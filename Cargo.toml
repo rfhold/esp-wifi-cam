@@ -1,0 +1,25 @@
+[package]
+name = "esp-wifi-cam"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+defmt = "1.1"
+embassy-executor = "0.10.0"
+embassy-net = { version = "0.9.0", features = ["dhcpv4", "dhcpv4-hostname", "medium-ethernet"] }
+embassy-time = "0.5.0"
+esp-alloc = { git = "https://github.com/esp-rs/esp-hal", tag = "esp-hal-v1.2.0", features = ["esp32s3"] }
+esp-backtrace = { git = "https://github.com/esp-rs/esp-hal", tag = "esp-hal-v1.2.0", features = ["defmt", "esp32s3", "panic-handler"] }
+esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal", tag = "esp-hal-v1.2.0", features = ["esp32s3"] }
+esp-hal = { git = "https://github.com/esp-rs/esp-hal", tag = "esp-hal-v1.2.0", features = ["defmt", "esp32s3", "unstable"] }
+esp-println = { git = "https://github.com/esp-rs/esp-hal", tag = "esp-hal-v1.2.0", features = ["defmt-espflash", "esp32s3"] }
+esp-radio = { git = "https://github.com/esp-rs/esp-hal", tag = "esp-hal-v1.2.0", features = ["defmt", "esp32s3", "wifi"] }
+esp-rtos = { git = "https://github.com/esp-rs/esp-hal", tag = "esp-hal-v1.2.0", features = ["defmt", "embassy", "esp-radio", "esp32s3"] }
+static_cell = "2.1.0"
+
+[profile.release]
+debug = true
+debug-assertions = true
+lto = "fat"
+codegen-units = 1
