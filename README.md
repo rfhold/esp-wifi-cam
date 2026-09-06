@@ -49,8 +49,8 @@ After DHCP completes, use the generated hostname or logged IPv4 address:
 
 | Path | Response |
 | --- | --- |
-| `/capture.jpg` | One QXGA (`2048x1536`) JPEG frame |
-| `/stream` | Continuous QXGA `multipart/x-mixed-replace` MJPEG stream |
+| `/capture.jpg` | One Full HD (`1920x1080`) JPEG frame |
+| `/stream` | Continuous Full HD (`1920x1080`) `multipart/x-mixed-replace` MJPEG stream |
 
 The stream is designed for ingestion by go2rtc. Because the ESP32-S3 produces JPEG rather than H.264, transcode the source on the NVR before using it for Frigate recording or detection.
 

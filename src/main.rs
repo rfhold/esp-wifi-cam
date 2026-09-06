@@ -214,7 +214,7 @@ async fn camera_task(camera: AsyncCameraDriver<'static>, i2c: I2c<'static, Block
         .initialize(
             &mut Delay::new(),
             SensorConfig {
-                frame_size: FrameSize::Qxga,
+                frame_size: FrameSize::FullHd,
                 jpeg_quality: 12,
             },
         )
@@ -224,7 +224,7 @@ async fn camera_task(camera: AsyncCameraDriver<'static>, i2c: I2c<'static, Block
         .expect("OV3660 vertical flip failed");
     sensor.set_brightness(1).expect("OV3660 brightness failed");
     sensor.set_saturation(-2).expect("OV3660 saturation failed");
-    defmt::info!("OV3660 initialized: QXGA JPEG quality 12, XCLK 10 MHz");
+    defmt::info!("OV3660 initialized: Full HD 1920x1080 JPEG quality 12, XCLK 10 MHz");
 
     let dma_buffer: DmaRxStreamBuf = dma_rx_stream_buffer!(DMA_RING, DMA_BLOCK);
     let mut capture = CameraCapture::new(camera, dma_buffer, CaptureConfig::default());

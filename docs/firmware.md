@@ -35,7 +35,7 @@ The repository ignores `.env`. Cargo does not load `.env` without a separate she
 1. The entry point selects the maximum CPU clock and initializes ESP32-S3 peripherals.
 2. The firmware allocates two internal heap regions and registers external PSRAM with the allocator. Two fixed-capacity 512 KiB JPEG frame buffers are allocated explicitly in PSRAM.
 3. ESP-RTOS starts from the first timer in `TIMG0`.
-4. The OV3660 receives a 10 MHz XCLK and is configured for its maximum QXGA (`2048x1536`) resolution in JPEG mode at quality 12. The XIAO module corrections enable vertical flip, set brightness to `+1`, and set saturation to `-2`.
+4. The OV3660 receives a 10 MHz XCLK and is configured for Full HD (`1920x1080`) resolution in JPEG mode at quality 12. The XIAO module corrections enable vertical flip, set brightness to `+1`, and set saturation to `-2`.
 5. LCD_CAM and GDMA capture into a 20 KiB internal-RAM DMA ring. An incremental parser assembles complete JPEG frames into the bounded PSRAM buffers and keeps the most recent available frame when the HTTP consumer falls behind. If the DMA ring fills before frame EOF, capture drops that frame, resets the camera receive path, and resynchronizes at a later frame boundary.
 6. The radio configures a WPA2-Personal station from `SSID` and `PASSWORD`.
 7. The firmware reads the station MAC from eFuse, derives the hostname from `HOSTNAME_PREFIX` and the final three MAC bytes, then sends it as DHCP Option 12 while requesting DHCPv4 configuration.

@@ -28,6 +28,7 @@ pub enum FrameSize {
     Vga,
     Svga,
     Hd,
+    FullHd,
     Uxga,
     Qxga,
 }
@@ -39,6 +40,7 @@ impl FrameSize {
             Self::Vga => (640, 480),
             Self::Svga => (800, 600),
             Self::Hd => (1280, 720),
+            Self::FullHd => (1920, 1080),
             Self::Uxga => (1600, 1200),
             Self::Qxga => (2048, 1536),
         }
@@ -54,6 +56,7 @@ impl TryFrom<(u16, u16)> for FrameSize {
             (640, 480) => Ok(Self::Vga),
             (800, 600) => Ok(Self::Svga),
             (1280, 720) => Ok(Self::Hd),
+            (1920, 1080) => Ok(Self::FullHd),
             (1600, 1200) => Ok(Self::Uxga),
             (2048, 1536) => Ok(Self::Qxga),
             (width, height) => Err(ConfigError::UnsupportedFrameSize { width, height }),
@@ -193,7 +196,7 @@ where
     pub fn set_frame_size(&mut self, frame_size: FrameSize) -> Result<(), Error<I2C::Error>> {
         let (width, height) = frame_size.dimensions();
         let geometry = match frame_size {
-            FrameSize::Hd => RATIO_16X9,
+            FrameSize::Hd | FrameSize::FullHd => RATIO_16X9,
             _ => RATIO_4X3,
         };
         let binning = width <= geometry.max_width / 2 && height <= geometry.max_height / 2;
@@ -546,6 +549,33 @@ mod tests {
         assert!(i2c.has_write(X_OUTPUT_SIZE + 3, 0xd0));
         assert!(i2c.has_write(SC_PLLS_CTRL1, 30));
         assert!(i2c.has_write(PCLK_RATIO, 10));
+    }
+
+    #[test]
+    fn programs_full_hd_output_and_16x9_crop() {
+        assert_eq!(FrameSize::FullHd.dimensions(), (1920, 1080));
+        assert_eq!(FrameSize::try_from((1920, 1080)), Ok(FrameSize::FullHd));
+
+        let mut sensor = Ov3660::new(MockI2c::ov3660(), 20_000_000);
+        sensor.set_frame_size(FrameSize::FullHd).unwrap();
+        let i2c = sensor.release();
+
+        for (register, value) in [
+            (X_ADDR_START, 0x00),
+            (X_ADDR_START + 1, 0x40),
+            (X_ADDR_START + 2, 0x00),
+            (X_ADDR_START + 3, 0xf2),
+            (X_ADDR_END, 0x07),
+            (X_ADDR_END + 1, 0xdf),
+            (X_ADDR_END + 2, 0x05),
+            (X_ADDR_END + 3, 0x35),
+            (X_OUTPUT_SIZE, 0x07),
+            (X_OUTPUT_SIZE + 1, 0x80),
+            (X_OUTPUT_SIZE + 2, 0x04),
+            (X_OUTPUT_SIZE + 3, 0x38),
+        ] {
+            assert!(i2c.has_write(register, value));
+        }
     }
 
     #[test]
