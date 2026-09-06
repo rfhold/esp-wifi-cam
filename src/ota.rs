@@ -118,6 +118,7 @@ async fn check_and_install(
         provision.track.as_str()
     )
     .map_err(|_| ())?;
+    defmt::info!("OTA fetching manifest");
 
     let manifest_len = {
         let mut client = HttpClient::new_with_tls(
@@ -150,6 +151,7 @@ async fn check_and_install(
         read_exact_body(&mut reader, &mut manifest_bytes[..expected]).await?;
         expected
     };
+    defmt::info!("OTA manifest fetched");
 
     let manifest = verify_manifest(
         &manifest_bytes[..manifest_len],
@@ -159,6 +161,7 @@ async fn check_and_install(
         crate::flash_layout::OTA_SLOT_LEN,
     )
     .map_err(|_| ())?;
+    defmt::info!("OTA manifest verified");
     install_image(
         tcp,
         dns,
@@ -170,6 +173,7 @@ async fn check_and_install(
         &mut response_buffer,
     )
     .await?;
+    defmt::info!("OTA image staged");
     Ok(true)
 }
 
@@ -203,10 +207,12 @@ async fn install_image(
         .request(Method::GET, url.as_str())
         .await
         .map_err(|_| ())?;
+    defmt::info!("OTA fetching image");
     let response = request.send(response_buffer).await.map_err(|_| ())?;
     if response.status != Status::Ok || response.content_length != Some(manifest.length as usize) {
         return Err(());
     }
+    defmt::info!("OTA image response accepted");
 
     let mut partition_buffer = [0u8; esp_bootloader_esp_idf::partitions::PARTITION_TABLE_MAX_LEN];
     let mut updater = OtaUpdater::new(flash, &mut partition_buffer).map_err(|_| ())?;
@@ -217,6 +223,7 @@ async fn install_image(
     partition
         .erase(0, partition.capacity() as u32)
         .map_err(|_| ())?;
+    defmt::info!("OTA inactive slot erased");
 
     TRANSFER_ACTIVE.store(true, Ordering::Release);
     let result = async {
@@ -253,6 +260,7 @@ async fn install_image(
     .await;
     TRANSFER_ACTIVE.store(false, Ordering::Release);
     result?;
+    defmt::info!("OTA image digest verified");
     drop(partition);
 
     updater.activate_next_partition().map_err(|_| ())?;
