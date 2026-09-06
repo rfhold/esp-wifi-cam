@@ -12,7 +12,9 @@ use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal}
 use embassy_time::{Duration, Timer};
 use embedded_io_async::Read;
 use esp_bootloader_esp_idf::{
-    ota::OtaImageState, ota_updater::OtaUpdater, partitions::PartitionType,
+    ota::OtaImageState,
+    ota_updater::OtaUpdater,
+    partitions::{AppPartitionSubType, PartitionType},
 };
 use esp_storage::FlashStorage;
 use heapless::String;
@@ -83,6 +85,9 @@ fn confirm_running_image(flash: &mut FlashStorage<'_>) -> Result<(), ()> {
         }
     };
     let mut updater = OtaUpdater::new(flash, &mut buffer).map_err(|_| ())?;
+    if booted == AppPartitionSubType::Factory {
+        return Ok(());
+    }
     if updater.selected_partition().map_err(|_| ())? != booted {
         return Err(());
     }
