@@ -1355,7 +1355,7 @@ dependencies = [
 
 [[package]]
 name = "esp-wifi-cam"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "allocator-api2",
  "defmt 1.1.1",
