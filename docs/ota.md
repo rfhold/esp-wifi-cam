@@ -22,7 +22,7 @@ Prerelease devices fetch the same path with `prerelease` in place of `stable`. T
 {"signed":{"schema":1,"board":"seeed-xiao-esp32s3-sense","target":"xtensa-esp32s3-none-elf","track":"stable","version":"1.2.4","path":"/rfhold/esp-wifi-cam/releases/download/v1.2.4/esp-wifi-cam-1.2.4-esp32s3.bin","length":1234567,"sha256":"<64 lowercase hex>"},"signature":"<Ed25519 base64url without padding>"}
 ```
 
-The envelope is at most 1536 bytes and rejects unknown or trailing fields. `length` must be nonzero and no greater than `0x370000`. The asset path must be at most 255 bytes, start with `/rfhold/esp-wifi-cam/releases/download/`, end in `.bin`, use only ASCII letters, digits, slash, dot, hyphen, and underscore, and contain no `..`, query, fragment, or doubled slash.
+The envelope is at most 1536 bytes and rejects unknown or trailing fields. `length` must be nonzero and no greater than `0x330000`. The asset path must be at most 255 bytes, start with `/rfhold/esp-wifi-cam/releases/download/`, end in `.bin`, use only ASCII letters, digits, slash, dot, hyphen, and underscore, and contain no `..`, query, fragment, or doubled slash.
 
 ## Canonical Signature Input
 
@@ -73,7 +73,7 @@ cargo +stable run -p release-tool \
   --output manifest.json \
   --public-key keys/ota-public.der \
   --private-key /path/to/temporary-private-key.pem \
-  --max-slot-length 0x370000
+  --max-slot-length 0x330000
 ```
 
 All eight options are required. `--track` is `stable` or `prerelease`; `--max-slot-length` accepts decimal or a `0x` hexadecimal value. The tool validates release policy and the app-only image, streams its SHA-256, checks that the PKCS#8-derived public key exactly equals the supplied DER, requires the recorded DER fingerprint, signs and self-verifies with `ed25519-dalek`, and atomically renames the bounded envelope into place. It prints only the public output path, never private key or signature content. CI must remove its temporary private PEM through its secret-handling cleanup path.
@@ -105,11 +105,11 @@ The shared CI image currently has no locally recorded digest, so pipeline steps 
 | `config` | `0x9000` | `0x4000` | Two provisioning journal sectors plus reserved space |
 | `otadata` | `0xd000` | `0x2000` | ESP-IDF OTA selection records |
 | `phy_init` | `0xf000` | `0x1000` | PHY initialization data |
-| `factory` | `0x10000` | `0x100000` | Initial recovery-capable application |
-| `ota_0` | `0x110000` | `0x370000` | OTA application slot 0 |
-| `ota_1` | `0x480000` | `0x370000` | OTA application slot 1 |
+| `factory` | `0x10000` | `0x180000` | Initial recovery-capable application |
+| `ota_0` | `0x1a0000` | `0x330000` | OTA application slot 0 |
+| `ota_1` | `0x4d0000` | `0x330000` | OTA application slot 1 |
 
-Before reading or writing provisioning sectors, firmware requires exactly 8 MiB of flash and validates the complete listed partition table through the same implementation used by the OTA task. An invalid layout halts startup without provisioning or network services. With a valid layout, OTA streams exactly the signed length to the inactive slot in at most 4096-byte chunks, hashes network bytes, immediately reads each chunk back, hashes persisted bytes independently, and requires both hashes to match. Only then does it select the slot, set its state to `New`, and software-reset.
+Before reading or writing provisioning sectors, firmware requires exactly 8 MiB of flash and validates the complete listed partition table through the same implementation used by the OTA task. The unused `0x10000` alignment gap after the factory partition permits both OTA application offsets to meet ESP-IDF's `0x10000` alignment requirement. An invalid layout halts startup without provisioning or network services. With a valid layout, OTA streams exactly the signed length to the inactive slot in at most 4096-byte chunks, hashes network bytes, immediately reads each chunk back, hashes persisted bytes independently, and requires both hashes to match. Only then does it select the slot, set its state to `New`, and software-reset.
 
 ## Bootloader And Confirmation
 

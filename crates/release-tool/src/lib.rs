@@ -410,7 +410,7 @@ mod tests {
                 output_path: self.output.clone(),
                 public_key_path: self.public_key.clone(),
                 private_key_path: self.private_key.clone(),
-                max_slot_length: 0x370000,
+                max_slot_length: 0x330000,
             }
         }
     }

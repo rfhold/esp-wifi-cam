@@ -1,6 +1,6 @@
 use esp_storage::FlashStorage;
 
-pub const OTA_SLOT_LEN: u32 = 0x370000;
+pub const OTA_SLOT_LEN: u32 = 0x330000;
 
 pub fn is_valid(flash: &mut FlashStorage<'_>) -> bool {
     if flash.capacity() != 8 * 1024 * 1024 {
@@ -15,9 +15,9 @@ pub fn is_valid(flash: &mut FlashStorage<'_>) -> bool {
         ("config", 1, 2, 0x9000, 0x4000),
         ("otadata", 1, 0, 0xd000, 0x2000),
         ("phy_init", 1, 1, 0xf000, 0x1000),
-        ("factory", 0, 0, 0x10000, 0x100000),
-        ("ota_0", 0, 0x10, 0x110000, OTA_SLOT_LEN),
-        ("ota_1", 0, 0x11, 0x480000, OTA_SLOT_LEN),
+        ("factory", 0, 0, 0x10000, 0x180000),
+        ("ota_0", 0, 0x10, 0x1a0000, OTA_SLOT_LEN),
+        ("ota_1", 0, 0x11, 0x4d0000, OTA_SLOT_LEN),
     ];
     table.iter().count() == expected.len()
         && expected.iter().all(|(label, kind, subtype, offset, len)| {

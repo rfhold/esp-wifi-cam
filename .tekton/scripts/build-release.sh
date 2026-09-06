@@ -26,7 +26,7 @@ espflash save-image --chip esp32s3 \
   ".esp-release/output/version/$image_name"
 [[ -f .esp-release/output/version/$image_name && ! -L .esp-release/output/version/$image_name ]] || fail 'app image was not created as a regular file'
 [[ $(stat -c '%s' ".esp-release/output/version/$image_name") -ge 1 ]] || fail 'app image is empty'
-[[ $(stat -c '%s' ".esp-release/output/version/$image_name") -le $((0x370000)) ]] || fail 'app image exceeds the OTA slot'
+[[ $(stat -c '%s' ".esp-release/output/version/$image_name") -le $((0x330000)) ]] || fail 'app image exceeds the OTA slot'
 [[ $(od -An -tx1 -N1 ".esp-release/output/version/$image_name" | tr -d '[:space:]') == e9 ]] || fail 'app image does not have ESP-IDF app image magic'
 
 install -m 0600 .esp-release/release-body.md .esp-release/output/version/release-body.md

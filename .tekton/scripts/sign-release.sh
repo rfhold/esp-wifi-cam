@@ -76,7 +76,7 @@ for track in "${tracks[@]}"; do
     --output "$version_manifest" \
     --public-key .esp-release/output/version/ota-public.der \
     --private-key "$private_key" \
-    --max-slot-length 0x370000
+    --max-slot-length 0x330000
   .esp-release/tools/release-tool \
     --track "$track" \
     --version "$version" \
@@ -85,7 +85,7 @@ for track in "${tracks[@]}"; do
     --output "$verify_envelope" \
     --public-key .esp-release/output/version/ota-public.der \
     --private-key "$private_key" \
-    --max-slot-length 0x370000
+    --max-slot-length 0x330000
   cmp -s "$version_manifest" "$verify_envelope" || fail 'repeated signed envelope verification differed'
   install -m 0644 "$version_manifest" "$channel_dir/manifest.json"
   jq -e \

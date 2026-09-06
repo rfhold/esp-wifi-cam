@@ -466,12 +466,12 @@ mod tests {
         spki[12..].copy_from_slice(signing_key.verifying_key().as_bytes());
 
         let verified =
-            verify_manifest(envelope.as_bytes(), &spki, Track::Stable, "1.2.3", 0x370000).unwrap();
+            verify_manifest(envelope.as_bytes(), &spki, Track::Stable, "1.2.3", 0x330000).unwrap();
         assert_eq!(verified.version.as_str(), "1.2.4");
 
         let changed = envelope.replace("1234", "1235");
         assert_eq!(
-            verify_manifest(changed.as_bytes(), &spki, Track::Stable, "1.2.3", 0x370000),
+            verify_manifest(changed.as_bytes(), &spki, Track::Stable, "1.2.3", 0x330000),
             Err(Error::Signature)
         );
     }
