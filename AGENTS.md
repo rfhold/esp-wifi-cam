@@ -4,8 +4,11 @@
 | --- | --- |
 | [`README.md`](README.md) | Human entry point, prerequisites, and build path. |
 | [`src/main.rs`](src/main.rs) | Firmware implementation for the ESP32-S3 Wi-Fi station. |
+| [`crates/ota-core/`](crates/ota-core/) | Host-testable provisioning, manifest verification, and update policy. |
+| [`crates/release-tool/`](crates/release-tool/) | Host-only release image validation and canonical manifest signing. |
 | [`docs/README.md`](docs/README.md) | Canonical documentation index. |
 | [`docs/firmware.md`](docs/firmware.md) | Firmware architecture, behavior, safety boundaries, and validation. |
+| [`docs/ota.md`](docs/ota.md) | Canonical signed A/B OTA and release artifact contract. |
 | [`.agents/skills/reviewing-changes/SKILL.md`](.agents/skills/reviewing-changes/SKILL.md) | Repository-specific read-only review guidance. |
 
 # Hints

@@ -30,6 +30,7 @@ use esp_hal::{
     rng::Rng,
     time::Rate,
     timer::timg::TimerGroup,
+    usb::usb_serial_jtag::UsbSerialJtag,
 };
 use esp_println as _;
 use esp_radio::wifi::{
@@ -42,6 +43,10 @@ use ov3660::{
     ConverterMode, FrameSize, JpegStreamParser, Ov3660, ParserProgressing,
 };
 
+mod flash_layout;
+mod ota;
+mod provision;
+
 esp_bootloader_esp_idf::esp_app_desc!();
 
 macro_rules! mk_static {
@@ -51,9 +56,6 @@ macro_rules! mk_static {
     }};
 }
 
-const SSID: &str = env!("SSID");
-const PASSWORD: &str = env!("PASSWORD");
-const HOSTNAME_PREFIX: &str = env!("HOSTNAME_PREFIX");
 const MAX_FRAME: usize = 512 * 1024;
 const DMA_RING: usize = 20 * 1024;
 const DMA_BLOCK: usize = 1024;
@@ -92,8 +94,18 @@ async fn main(spawner: Spawner) -> ! {
         assert!(EMPTY_FRAMES.try_send(FrameBuffer { data, len: 0 }).is_ok());
     }
 
+    let mut flash = esp_storage::FlashStorage::new(peripherals.FLASH);
+    let layout_valid = flash_layout::is_valid(&mut flash);
+
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
+    if !layout_valid {
+        defmt::error!("Startup halted: invalid flash or partition layout");
+        halt().await;
+    }
+
+    let usb = UsbSerialJtag::new(peripherals.USB_DEVICE).into_async();
+    let provisioning = provision::load_or_provision(&mut flash, usb).await;
 
     let camera_config = CamConfig::default()
         .with_frequency(Rate::from_mhz(10))
@@ -128,9 +140,9 @@ async fn main(spawner: Spawner) -> ! {
 
     let station_config = Config::Station(
         StationConfig::default()
-            .with_ssid(SSID.try_into().unwrap())
+            .with_ssid(provisioning.ssid.as_str().try_into().unwrap())
             .with_authentication(AuthenticationMethodConfig::Wpa2Personal(
-                PASSWORD.try_into().unwrap(),
+                provisioning.password.as_str().try_into().unwrap(),
             )),
     );
 
@@ -141,14 +153,10 @@ async fn main(spawner: Spawner) -> ! {
     )
     .unwrap();
 
-    assert!(
-        HOSTNAME_PREFIX.len() <= 25,
-        "HOSTNAME_PREFIX must be at most 25 bytes"
-    );
     let station_mac = efuse::interface_mac_address(InterfaceMacAddress::Station);
     let station_mac_bytes = station_mac.as_bytes();
     let hostname = format!(
-        "{HOSTNAME_PREFIX}-{:02x}{:02x}{:02x}",
+        "esp-cam-{:02x}{:02x}{:02x}",
         station_mac_bytes[3], station_mac_bytes[4], station_mac_bytes[5]
     );
     let mut dhcp_config = embassy_net::DhcpConfig::default();
@@ -159,7 +167,7 @@ async fn main(spawner: Spawner) -> ! {
     let (stack, runner) = embassy_net::new(
         wifi_interface,
         network_config,
-        mk_static!(StackResources<3>, StackResources::<3>::new()),
+        mk_static!(StackResources<6>, StackResources::<6>::new()),
         seed,
     );
 
@@ -167,6 +175,7 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(net_task(runner).unwrap());
     spawner.spawn(camera_task(camera, i2c).unwrap());
     spawner.spawn(http_server(stack).unwrap());
+    spawner.spawn(ota::ota_task(stack, flash, provisioning, seed).unwrap());
 
     stack.wait_config_up().await;
     if let Some(config) = stack.config_v4() {
@@ -182,6 +191,12 @@ async fn main(spawner: Spawner) -> ! {
     }
 
     core::future::pending().await
+}
+
+async fn halt() -> ! {
+    loop {
+        Timer::after(Duration::from_secs(60 * 60)).await;
+    }
 }
 
 #[embassy_executor::task]
@@ -265,6 +280,7 @@ async fn camera_task(camera: AsyncCameraDriver<'static>, i2c: I2c<'static, Block
                 Ok(ParserProgressing::InputBufferEmpty) => break,
                 Ok(ParserProgressing::EndOfImage) => {
                     let len = parser.bytes_written();
+                    ota::CAMERA_HEALTHY.signal(());
                     frames = frames.saturating_add(1);
                     bytes = bytes.saturating_add(len as u64);
                     if let Ok(next) = EMPTY_FRAMES
@@ -364,6 +380,13 @@ async fn http_server(stack: embassy_net::Stack<'static>) {
 }
 
 async fn handle_http_connection(socket: &mut TcpSocket<'_>) -> Result<(), embassy_net::tcp::Error> {
+    if ota::TRANSFER_ACTIVE.load(core::sync::atomic::Ordering::Acquire) {
+        return socket
+            .write_all(
+                b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            )
+            .await;
+    }
     let mut request = [0u8; 512];
     let mut used = 0usize;
     while used < request.len() && !request[..used].windows(4).any(|part| part == b"\r\n\r\n") {
@@ -401,6 +424,12 @@ async fn stream_mjpeg(socket: &mut TcpSocket<'_>) -> Result<(), embassy_net::tcp
     socket.write_all(headers.as_bytes()).await?;
 
     loop {
+        if ota::TRANSFER_ACTIVE.load(core::sync::atomic::Ordering::Acquire) {
+            socket
+                .write_all(format!("--{}--\r\n", HTTP_BOUNDARY).as_bytes())
+                .await?;
+            return Ok(());
+        }
         let frame = match with_timeout(Duration::from_secs(5), READY_FRAMES.receive()).await {
             Ok(frame) => frame,
             Err(_) => {

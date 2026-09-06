@@ -1,0 +1,13 @@
+[package]
+name = "release-tool"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+base64ct = { version = "1.8.3", features = ["alloc"] }
+ed25519-dalek = { version = "2.2.0", default-features = false, features = ["pem", "std", "zeroize"] }
+ota-core = { path = "../ota-core" }
+semver = "1.0.28"
+sha2 = "0.10.9"
+zeroize = "1.9.0"

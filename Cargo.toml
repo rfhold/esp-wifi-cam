@@ -5,14 +5,15 @@ edition = "2024"
 publish = false
 
 [workspace]
-members = ["crates/ov3660"]
+members = ["crates/ota-core", "crates/ov3660", "crates/release-tool"]
 resolver = "3"
 
 [dependencies]
 allocator-api2 = { version = "0.3.0", default-features = false, features = ["alloc"] }
 defmt = "1.1"
+der = { version = "=0.8.0-rc.10", default-features = false, features = ["heapless"] }
 embassy-executor = "0.10.0"
-embassy-net = { version = "0.9.0", features = ["dhcpv4", "dhcpv4-hostname", "medium-ethernet", "tcp"] }
+embassy-net = { version = "=0.9.1", features = ["dhcpv4", "dhcpv4-hostname", "dns", "medium-ethernet", "tcp"] }
 embassy-sync = "0.8.0"
 embassy-time = "0.5.0"
 embedded-io-async = "0.7.0"
@@ -23,8 +24,12 @@ esp-hal = { git = "https://github.com/esp-rs/esp-hal", tag = "esp-hal-v1.2.0", f
 esp-println = { git = "https://github.com/esp-rs/esp-hal", tag = "esp-hal-v1.2.0", features = ["defmt-espflash", "esp32s3"] }
 esp-radio = { git = "https://github.com/esp-rs/esp-hal", tag = "esp-hal-v1.2.0", features = ["defmt", "esp32s3", "wifi"] }
 esp-rtos = { git = "https://github.com/esp-rs/esp-hal", tag = "esp-hal-v1.2.0", features = ["defmt", "embassy", "esp-radio", "esp32s3"] }
+esp-storage = { git = "https://github.com/esp-rs/esp-hal", tag = "esp-hal-v1.2.0", features = ["esp32s3"] }
 heapless = "0.9.1"
+ota-core = { path = "crates/ota-core" }
 ov3660 = { path = "crates/ov3660", features = ["esp32s3"] }
+reqwless = { version = "0.14.0", default-features = false, features = ["embedded-tls", "rsa"] }
+sha2 = { version = "0.10.9", default-features = false }
 static_cell = "2.1.0"
 
 [profile.release]

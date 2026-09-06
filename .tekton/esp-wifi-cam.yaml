@@ -1,0 +1,106 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: esp-wifi-cam
+  annotations:
+    pipelinesascode.tekton.dev/on-event: "[pull_request, push, incoming]"
+    pipelinesascode.tekton.dev/on-target-branch: "[main]"
+    pipelinesascode.tekton.dev/max-keep-runs: "5"
+spec:
+  taskRunSpecs:
+    - pipelineTaskName: validate-source
+      podTemplate:
+        nodeSelector:
+          kubernetes.io/arch: amd64
+  timeouts:
+    pipeline: 2h0m0s
+  params:
+    - name: repo-url
+      value: "{{ repo_url }}"
+    - name: revision
+      value: "{{ revision }}"
+  pipelineSpec:
+    params:
+      - name: repo-url
+        type: string
+      - name: revision
+        type: string
+    workspaces:
+      - name: source
+    tasks:
+      - name: fetch-repository
+        retries: 1
+        taskSpec:
+          params:
+            - name: repo-url
+              type: string
+            - name: revision
+              type: string
+          workspaces:
+            - name: output
+          volumes:
+            - name: git-auth
+              secret:
+                secretName: "{{ git_auth_secret }}"
+          steps:
+            - name: clone
+              image: docker.io/alpine/git:2.49.1@sha256:c0280cf9572316299b08544065d3bf35db65043d5e3963982ec50647d2746e26
+              workingDir: $(workspaces.output.path)
+              env:
+                - name: REPO_URL
+                  value: $(params.repo-url)
+                - name: REVISION
+                  value: $(params.revision)
+              volumeMounts:
+                - name: git-auth
+                  mountPath: /etc/git-auth
+                  readOnly: true
+              script: |
+                #!/bin/sh
+                set -eu
+                printf '%s\n' "$REVISION" | grep -Eq '^[0-9a-f]{40}$'
+                case "$REPO_URL" in
+                  https://git.holdenitdown.net/rfhold/esp-wifi-cam|https://git.holdenitdown.net/rfhold/esp-wifi-cam.git) ;;
+                  *) exit 1 ;;
+                esac
+                cp /etc/git-auth/.gitconfig /root/.gitconfig
+                cp /etc/git-auth/.git-credentials /root/.git-credentials
+                git clone --no-checkout "$REPO_URL" .
+                git checkout --detach "$REVISION"
+                test "$(git rev-parse HEAD)" = "$REVISION"
+        params:
+          - name: repo-url
+            value: $(params.repo-url)
+          - name: revision
+            value: $(params.revision)
+        workspaces:
+          - name: output
+            workspace: source
+
+      - name: validate-source
+        runAfter: [fetch-repository]
+        retries: 1
+        taskSpec:
+          workspaces:
+            - name: source
+          steps:
+            - name: validate
+              image: cr.holdenitdown.net/rfhold/general-ci:latest
+              imagePullPolicy: Always
+              workingDir: $(workspaces.source.path)
+              script: |
+                #!/bin/sh
+                set -eu
+                exec bash .tekton/scripts/validate.sh
+        workspaces:
+          - name: source
+            workspace: source
+  workspaces:
+    - name: source
+      volumeClaimTemplate:
+        spec:
+          accessModes: [ReadWriteMany]
+          storageClassName: shared-fs
+          resources:
+            requests:
+              storage: 10Gi

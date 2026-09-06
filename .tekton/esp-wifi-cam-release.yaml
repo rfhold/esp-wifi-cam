@@ -1,0 +1,612 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: esp-wifi-cam-release
+  annotations:
+    pipelinesascode.tekton.dev/on-cel-expression: 'event == "push" && target_branch.matches("^refs/tags/v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$")'
+    pipelinesascode.tekton.dev/max-keep-runs: "10"
+    pipelinesascode.tekton.dev/task: "https://git.holdenitdown.net/rfhold/homelab/raw/branch/main/src/components/tekton-tasks/forgejo-release-upsert.yaml"
+spec:
+  taskRunSpecs:
+    - pipelineTaskName: build-release
+      podTemplate:
+        nodeSelector:
+          kubernetes.io/arch: amd64
+    - pipelineTaskName: sign-release
+      serviceAccountName: kuri-forgejo-release-v1
+      podTemplate:
+        nodeSelector:
+          kubernetes.io/arch: amd64
+      stepSpecs:
+        - name: openbao-login
+          imagePullPolicy: Always
+        - name: sign
+          imagePullPolicy: Always
+    - pipelineTaskName: check-version-release
+      serviceAccountName: kuri-forgejo-release-v1
+      stepSpecs:
+        - name: openbao-login
+          imagePullPolicy: Always
+        - name: check
+          imagePullPolicy: Always
+    - pipelineTaskName: publish-version
+      serviceAccountName: kuri-forgejo-release-v1
+      stepSpecs:
+        - name: openbao-login
+          imagePullPolicy: Always
+        - name: upsert-release
+          imagePullPolicy: Always
+    - pipelineTaskName: publish-stable-channel
+      serviceAccountName: kuri-forgejo-release-v1
+      stepSpecs:
+        - name: openbao-login
+          imagePullPolicy: Always
+        - name: upsert-release
+          imagePullPolicy: Always
+    - pipelineTaskName: check-stable-channel-assets
+      serviceAccountName: kuri-forgejo-release-v1
+      stepSpecs:
+        - name: openbao-login
+          imagePullPolicy: Always
+        - name: check
+          imagePullPolicy: Always
+    - pipelineTaskName: check-prerelease-channel-assets
+      serviceAccountName: kuri-forgejo-release-v1
+      stepSpecs:
+        - name: openbao-login
+          imagePullPolicy: Always
+        - name: check
+          imagePullPolicy: Always
+    - pipelineTaskName: publish-prerelease-channel
+      serviceAccountName: kuri-forgejo-release-v1
+      stepSpecs:
+        - name: openbao-login
+          imagePullPolicy: Always
+        - name: upsert-release
+          imagePullPolicy: Always
+  timeouts:
+    pipeline: 3h0m0s
+  params:
+    - name: repo-url
+      value: "{{ repo_url }}"
+    - name: revision
+      value: "{{ revision }}"
+    - name: source-branch
+      value: "{{ source_branch }}"
+  pipelineSpec:
+    params:
+      - name: repo-url
+        type: string
+      - name: revision
+        type: string
+      - name: source-branch
+        type: string
+    workspaces:
+      - name: source
+    tasks:
+      - name: fetch-repository
+        retries: 1
+        taskSpec:
+          params:
+            - name: repo-url
+              type: string
+            - name: revision
+              type: string
+          workspaces:
+            - name: output
+          volumes:
+            - name: git-auth
+              secret:
+                secretName: "{{ git_auth_secret }}"
+          steps:
+            - name: clone
+              image: docker.io/alpine/git:2.49.1@sha256:c0280cf9572316299b08544065d3bf35db65043d5e3963982ec50647d2746e26
+              workingDir: $(workspaces.output.path)
+              env:
+                - name: REPO_URL
+                  value: $(params.repo-url)
+                - name: REVISION
+                  value: $(params.revision)
+              volumeMounts:
+                - name: git-auth
+                  mountPath: /etc/git-auth
+                  readOnly: true
+              script: |
+                #!/bin/sh
+                set -eu
+                printf '%s\n' "$REVISION" | grep -Eq '^[0-9a-f]{40}$'
+                case "$REPO_URL" in
+                  https://git.holdenitdown.net/rfhold/esp-wifi-cam|https://git.holdenitdown.net/rfhold/esp-wifi-cam.git) ;;
+                  *) exit 1 ;;
+                esac
+                cp /etc/git-auth/.gitconfig /root/.gitconfig
+                cp /etc/git-auth/.git-credentials /root/.git-credentials
+                git clone --no-checkout "$REPO_URL" .
+                git checkout --detach "$REVISION"
+                test "$(git rev-parse HEAD)" = "$REVISION"
+        params:
+          - name: repo-url
+            value: $(params.repo-url)
+          - name: revision
+            value: $(params.revision)
+        workspaces:
+          - name: output
+            workspace: source
+
+      - name: validate-release
+        runAfter: [fetch-repository]
+        taskSpec:
+          params:
+            - name: revision
+              type: string
+            - name: source-branch
+              type: string
+          results:
+            - name: tag
+              type: string
+            - name: version
+              type: string
+          workspaces:
+            - name: source
+          steps:
+            - name: policy
+              image: cr.holdenitdown.net/rfhold/general-ci:latest
+              imagePullPolicy: Always
+              workingDir: $(workspaces.source.path)
+              env:
+                - name: RELEASE_KIND
+                  value: stable
+                - name: REVISION
+                  value: $(params.revision)
+                - name: SOURCE_BRANCH
+                  value: $(params.source-branch)
+                - name: TAG_RESULT
+                  value: $(results.tag.path)
+                - name: VERSION_RESULT
+                  value: $(results.version.path)
+              script: |
+                #!/bin/sh
+                set -eu
+                exec bash .tekton/scripts/validate-release.sh
+        params:
+          - name: revision
+            value: $(params.revision)
+          - name: source-branch
+            value: $(params.source-branch)
+        workspaces:
+          - name: source
+            workspace: source
+
+      - name: build-release
+        runAfter: [validate-release]
+        retries: 1
+        taskSpec:
+          params:
+            - name: version
+              type: string
+          workspaces:
+            - name: source
+          steps:
+            - name: build
+              image: cr.holdenitdown.net/rfhold/general-ci:latest
+              imagePullPolicy: Always
+              workingDir: $(workspaces.source.path)
+              script: |
+                #!/bin/sh
+                set -eu
+                exec bash .tekton/scripts/build-release.sh "$(params.version)"
+        params:
+          - name: version
+            value: $(tasks.validate-release.results.version)
+        workspaces:
+          - name: source
+            workspace: source
+
+      - name: sign-release
+        runAfter: [build-release]
+        taskSpec:
+          params:
+            - name: version
+              type: string
+          workspaces:
+            - name: source
+          volumes:
+            - name: openbao-ci-jwt
+              projected:
+                sources:
+                  - serviceAccountToken:
+                      path: token
+                      audience: kuri-forgejo-release-v1
+                      expirationSeconds: 600
+            - name: openbao-ci-session
+              emptyDir:
+                medium: Memory
+                sizeLimit: 2Mi
+          steps:
+            - name: openbao-login
+              ref:
+                name: openbao-kubernetes-login
+              params:
+                - name: role
+                  value: kuri-forgejo-release-v1
+                - name: expected-policy
+                  value: kuri-forgejo-release-v1
+                - name: max-lease-seconds
+                  value: "900"
+            - name: sign
+              image: cr.holdenitdown.net/rfhold/general-ci:latest
+              workingDir: $(workspaces.source.path)
+              volumeMounts:
+                - name: openbao-ci-session
+                  mountPath: /var/run/secrets/openbao-ci/session
+              script: |
+                #!/bin/sh
+                set -eu
+                exec bash .tekton/scripts/sign-release.sh stable "$(params.version)"
+        params:
+          - name: version
+            value: $(tasks.validate-release.results.version)
+        workspaces:
+          - name: source
+            workspace: source
+
+      - name: check-version-input
+        runAfter: [sign-release]
+        taskSpec:
+          params:
+            - name: version
+              type: string
+          workspaces:
+            - name: source
+          steps:
+            - name: check
+              image: cr.holdenitdown.net/rfhold/general-ci:latest
+              imagePullPolicy: Always
+              workingDir: $(workspaces.source.path)
+              script: |
+                #!/bin/sh
+                set -eu
+                exec bash .tekton/scripts/check-publish-input.sh .esp-release/output/version \
+                  release-body.md \
+                  ota-public.der \
+                  "esp-wifi-cam-$(params.version)-esp32s3.bin" \
+                  "esp-wifi-cam-$(params.version)-stable-manifest.json" \
+                  "esp-wifi-cam-$(params.version)-prerelease-manifest.json"
+        params:
+          - name: version
+            value: $(tasks.validate-release.results.version)
+        workspaces:
+          - name: source
+            workspace: source
+
+      - name: check-version-release
+        runAfter: [check-version-input]
+        taskSpec:
+          params:
+            - name: tag
+              type: string
+            - name: revision
+              type: string
+            - name: version
+              type: string
+          results:
+            - name: publish-required
+              type: string
+          workspaces:
+            - name: source
+          volumes:
+            - name: openbao-ci-jwt
+              projected:
+                sources:
+                  - serviceAccountToken:
+                      path: token
+                      audience: kuri-forgejo-release-v1
+                      expirationSeconds: 600
+            - name: openbao-ci-session
+              emptyDir:
+                medium: Memory
+                sizeLimit: 8Mi
+          steps:
+            - name: openbao-login
+              ref:
+                name: openbao-kubernetes-login
+              params:
+                - name: role
+                  value: kuri-forgejo-release-v1
+                - name: expected-policy
+                  value: kuri-forgejo-release-v1
+                - name: max-lease-seconds
+                  value: "900"
+            - name: check
+              image: cr.holdenitdown.net/rfhold/general-ci:latest
+              workingDir: $(workspaces.source.path)
+              env:
+                - name: RELEASE_TAG
+                  value: $(params.tag)
+                - name: REVISION
+                  value: $(params.revision)
+                - name: RELEASE_TITLE
+                  value: ESP Wi-Fi Cam $(params.tag)
+                - name: PRERELEASE
+                  value: "false"
+                - name: BODY_FILE
+                  value: $(workspaces.source.path)/.esp-release/output/version/release-body.md
+                - name: LOCAL_DIR
+                  value: $(workspaces.source.path)/.esp-release/output/version
+                - name: RESULT_PATH
+                  value: $(results.publish-required.path)
+              volumeMounts:
+                - name: openbao-ci-session
+                  mountPath: /var/run/secrets/openbao-ci/session
+              script: |
+                #!/bin/sh
+                set -eu
+                exec bash .tekton/scripts/check-version-release.sh \
+                  "esp-wifi-cam-$(params.version)-esp32s3.bin" \
+                  "esp-wifi-cam-$(params.version)-stable-manifest.json" \
+                  "esp-wifi-cam-$(params.version)-prerelease-manifest.json" \
+                  ota-public.der
+        params:
+          - name: tag
+            value: $(tasks.validate-release.results.tag)
+          - name: revision
+            value: $(params.revision)
+          - name: version
+            value: $(tasks.validate-release.results.version)
+        workspaces:
+          - name: source
+            workspace: source
+
+      - name: publish-version
+        runAfter: [check-version-release]
+        when:
+          - input: $(tasks.check-version-release.results.publish-required)
+            operator: in
+            values: ["true"]
+        retries: 1
+        taskRef:
+          apiVersion: tekton.dev/v1
+          kind: Task
+          name: forgejo-release-upsert
+        params:
+          - name: git-url
+            value: "{{ GIT_URL }}"
+          - name: repo-owner
+            value: rfhold
+          - name: repo-name
+            value: esp-wifi-cam
+          - name: tag
+            value: $(tasks.validate-release.results.tag)
+          - name: target-commitish
+            value: $(params.revision)
+          - name: title
+            value: "ESP Wi-Fi Cam $(tasks.validate-release.results.tag)"
+          - name: body-file
+            value: release-body.md
+          - name: prerelease
+            value: "false"
+          - name: draft
+            value: "false"
+          - name: asset-relative-paths
+            value:
+              - esp-wifi-cam-$(tasks.validate-release.results.version)-esp32s3.bin
+              - esp-wifi-cam-$(tasks.validate-release.results.version)-stable-manifest.json
+              - esp-wifi-cam-$(tasks.validate-release.results.version)-prerelease-manifest.json
+              - ota-public.der
+          - name: openbao-role
+            value: kuri-forgejo-release-v1
+          - name: openbao-policy
+            value: kuri-forgejo-release-v1
+          - name: openbao-token-secret-path
+            value: kv/data/ci/kuri/forgejo-release
+        workspaces:
+          - name: input
+            workspace: source
+            subPath: .esp-release/output/version
+
+      - name: check-stable-channel-input
+        runAfter: [publish-version]
+        taskSpec:
+          workspaces:
+            - name: source
+          steps:
+            - name: check
+              image: cr.holdenitdown.net/rfhold/general-ci:latest
+              imagePullPolicy: Always
+              workingDir: $(workspaces.source.path)
+              script: |
+                #!/bin/sh
+                set -eu
+                exec bash .tekton/scripts/check-publish-input.sh .esp-release/output/stable release-body.md manifest.json
+        workspaces:
+          - name: source
+            workspace: source
+
+      - name: check-prerelease-channel-input
+        runAfter: [publish-version]
+        taskSpec:
+          workspaces:
+            - name: source
+          steps:
+            - name: check
+              image: cr.holdenitdown.net/rfhold/general-ci:latest
+              imagePullPolicy: Always
+              workingDir: $(workspaces.source.path)
+              script: |
+                #!/bin/sh
+                set -eu
+                exec bash .tekton/scripts/check-publish-input.sh .esp-release/output/prerelease release-body.md manifest.json
+        workspaces:
+          - name: source
+            workspace: source
+
+      - name: check-stable-channel-assets
+        runAfter: [check-stable-channel-input]
+        taskSpec:
+          workspaces:
+            - name: source
+          volumes:
+            - name: openbao-ci-jwt
+              projected:
+                sources:
+                  - serviceAccountToken:
+                      path: token
+                      audience: kuri-forgejo-release-v1
+                      expirationSeconds: 600
+            - name: openbao-ci-session
+              emptyDir:
+                medium: Memory
+                sizeLimit: 2Mi
+          steps:
+            - name: openbao-login
+              ref:
+                name: openbao-kubernetes-login
+              params:
+                - name: role
+                  value: kuri-forgejo-release-v1
+                - name: expected-policy
+                  value: kuri-forgejo-release-v1
+                - name: max-lease-seconds
+                  value: "900"
+            - name: check
+              image: cr.holdenitdown.net/rfhold/general-ci:latest
+              workingDir: $(workspaces.source.path)
+              volumeMounts:
+                - name: openbao-ci-session
+                  mountPath: /var/run/secrets/openbao-ci/session
+              script: |
+                #!/bin/sh
+                set -eu
+                exec bash .tekton/scripts/check-channel-assets.sh stable .esp-release/output/stable/manifest.json
+        workspaces:
+          - name: source
+            workspace: source
+
+      - name: check-prerelease-channel-assets
+        runAfter: [check-prerelease-channel-input]
+        taskSpec:
+          workspaces:
+            - name: source
+          volumes:
+            - name: openbao-ci-jwt
+              projected:
+                sources:
+                  - serviceAccountToken:
+                      path: token
+                      audience: kuri-forgejo-release-v1
+                      expirationSeconds: 600
+            - name: openbao-ci-session
+              emptyDir:
+                medium: Memory
+                sizeLimit: 2Mi
+          steps:
+            - name: openbao-login
+              ref:
+                name: openbao-kubernetes-login
+              params:
+                - name: role
+                  value: kuri-forgejo-release-v1
+                - name: expected-policy
+                  value: kuri-forgejo-release-v1
+                - name: max-lease-seconds
+                  value: "900"
+            - name: check
+              image: cr.holdenitdown.net/rfhold/general-ci:latest
+              workingDir: $(workspaces.source.path)
+              volumeMounts:
+                - name: openbao-ci-session
+                  mountPath: /var/run/secrets/openbao-ci/session
+              script: |
+                #!/bin/sh
+                set -eu
+                exec bash .tekton/scripts/check-channel-assets.sh prerelease .esp-release/output/prerelease/manifest.json
+        workspaces:
+          - name: source
+            workspace: source
+
+      - name: publish-stable-channel
+        runAfter: [check-stable-channel-assets]
+        retries: 1
+        taskRef:
+          apiVersion: tekton.dev/v1
+          kind: Task
+          name: forgejo-release-upsert
+        params:
+          - name: git-url
+            value: "{{ GIT_URL }}"
+          - name: repo-owner
+            value: rfhold
+          - name: repo-name
+            value: esp-wifi-cam
+          - name: tag
+            value: stable
+          - name: target-commitish
+            value: $(params.revision)
+          - name: title
+            value: ESP Wi-Fi Cam stable channel
+          - name: body-file
+            value: release-body.md
+          - name: prerelease
+            value: "false"
+          - name: draft
+            value: "false"
+          - name: asset-relative-paths
+            value: [manifest.json]
+          - name: openbao-role
+            value: kuri-forgejo-release-v1
+          - name: openbao-policy
+            value: kuri-forgejo-release-v1
+          - name: openbao-token-secret-path
+            value: kv/data/ci/kuri/forgejo-release
+        workspaces:
+          - name: input
+            workspace: source
+            subPath: .esp-release/output/stable
+
+      - name: publish-prerelease-channel
+        runAfter: [check-prerelease-channel-assets]
+        retries: 1
+        taskRef:
+          apiVersion: tekton.dev/v1
+          kind: Task
+          name: forgejo-release-upsert
+        params:
+          - name: git-url
+            value: "{{ GIT_URL }}"
+          - name: repo-owner
+            value: rfhold
+          - name: repo-name
+            value: esp-wifi-cam
+          - name: tag
+            value: prerelease
+          - name: target-commitish
+            value: $(params.revision)
+          - name: title
+            value: ESP Wi-Fi Cam prerelease channel
+          - name: body-file
+            value: release-body.md
+          - name: prerelease
+            value: "true"
+          - name: draft
+            value: "false"
+          - name: asset-relative-paths
+            value: [manifest.json]
+          - name: openbao-role
+            value: kuri-forgejo-release-v1
+          - name: openbao-policy
+            value: kuri-forgejo-release-v1
+          - name: openbao-token-secret-path
+            value: kv/data/ci/kuri/forgejo-release
+        workspaces:
+          - name: input
+            workspace: source
+            subPath: .esp-release/output/prerelease
+  workspaces:
+    - name: source
+      volumeClaimTemplate:
+        spec:
+          accessModes: [ReadWriteMany]
+          storageClassName: shared-fs
+          resources:
+            requests:
+              storage: 10Gi
