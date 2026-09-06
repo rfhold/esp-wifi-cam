@@ -107,7 +107,7 @@ async fn check_and_install(
     provision: &Provisioning,
     tls_seed: u64,
 ) -> Result<bool, ()> {
-    let mut tls_read = [0u8; 4096];
+    let mut tls_read = [0u8; 20480];
     let mut tls_write = [0u8; 4096];
     let mut response_buffer = [0u8; 2048];
     let mut manifest_bytes = [0u8; MANIFEST_MAX_LEN];
@@ -138,7 +138,7 @@ async fn check_and_install(
         let mut request = client
             .request(Method::GET, manifest_url.as_str())
             .await
-            .map_err(|_| ())?;
+            .map_err(log_manifest_request_error)?;
         let response = request.send(&mut response_buffer).await.map_err(|_| ())?;
         if response.status != Status::Ok
             || response.content_length.is_none()
@@ -177,13 +177,22 @@ async fn check_and_install(
     Ok(true)
 }
 
+fn log_manifest_request_error(error: reqwless::Error) -> () {
+    match error {
+        reqwless::Error::Dns => defmt::warn!("OTA manifest DNS failed"),
+        reqwless::Error::Network(_) => defmt::warn!("OTA manifest TCP failed"),
+        reqwless::Error::Tls(_) => defmt::warn!("OTA manifest TLS failed"),
+        _ => defmt::warn!("OTA manifest request failed"),
+    }
+}
+
 async fn install_image(
     tcp: &TcpClient<'static, 1, 4096, 4096>,
     dns: &DnsSocket<'static>,
     flash: &mut FlashStorage<'_>,
     manifest: &VerifiedManifest,
     tls_seed: u64,
-    tls_read: &mut [u8; 4096],
+    tls_read: &mut [u8; 20480],
     tls_write: &mut [u8; 4096],
     response_buffer: &mut [u8; 2048],
 ) -> Result<(), ()> {
@@ -235,16 +244,26 @@ async fn install_image(
         let mut persisted = Sha256::new();
         while offset < manifest.length {
             let length = (manifest.length - offset).min(chunk.len() as u32) as usize;
-            read_exact_body(&mut body, &mut chunk[..length]).await?;
+            read_exact_body(&mut body, &mut chunk[..length])
+                .await
+                .map_err(|_| {
+                    defmt::warn!("OTA image read failed");
+                })?;
             if offset == 0 && chunk[0] != 0xe9 {
+                defmt::warn!("OTA image magic rejected");
                 return Err(());
             }
             downloaded.update(&chunk[..length]);
-            partition.write(offset, &chunk[..length]).map_err(|_| ())?;
+            partition.write(offset, &chunk[..length]).map_err(|_| {
+                defmt::warn!("OTA image write failed");
+            })?;
             partition
                 .read(offset, &mut readback[..length])
-                .map_err(|_| ())?;
+                .map_err(|_| {
+                    defmt::warn!("OTA image readback failed");
+                })?;
             if readback[..length] != chunk[..length] {
+                defmt::warn!("OTA image readback mismatch");
                 return Err(());
             }
             persisted.update(&readback[..length]);
@@ -253,6 +272,7 @@ async fn install_image(
         if downloaded.finalize().as_slice() != manifest.sha256
             || persisted.finalize().as_slice() != manifest.sha256
         {
+            defmt::warn!("OTA image digest mismatch");
             return Err(());
         }
         Ok(())

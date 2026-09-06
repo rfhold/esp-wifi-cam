@@ -4,7 +4,7 @@ This document defines the canonical provisioning-independent release, manifest, 
 
 ## Trust And Transport
 
-The only OTA origin is `https://git.holdenitdown.net`. Firmware constructs URLs from that constant and signed relative paths, requires HTTPS with the checked-in ISRG Root X1 DER certificate, rejects every non-success response including redirects, and requires `Content-Length` for both responses. The embedded TLS verifier has no trusted clock and a 4096-byte certificate-chain capacity. Ed25519 manifest verification, not TLS alone, is the release authenticity boundary.
+The only OTA origin is `https://git.holdenitdown.net`. Firmware constructs URLs from that constant and signed relative paths, requires HTTPS with the checked-in ISRG Root X1 DER certificate, rejects every non-success response including redirects, and requires `Content-Length` for both responses. The TLS receive buffer is 20480 bytes. The embedded TLS verifier has no trusted clock and a 4096-byte certificate-chain capacity. Ed25519 manifest verification, not TLS alone, is the release authenticity boundary.
 
 [`keys/ota-public.der`](../keys/ota-public.der) is a 44-byte Ed25519 SubjectPublicKeyInfo DER trust anchor with SHA-256 fingerprint `6eadf451f13c0be6714da1a25eee22421a67203195d1128bfc98ba68cf12a5b7`. The firmware accepts that exact DER structure and no other algorithm. OpenBao remains the authoritative private-key store. Secret delivery may materialize the seeded key only as the release job's temporary PKCS#8 PEM input; it must never enter the repository, logs, caches, or release artifacts.
 
