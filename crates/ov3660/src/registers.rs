@@ -1,0 +1,25 @@
+pub(crate) const SYSTEM_CONTROL0: u16 = 0x3008;
+pub(crate) const PID_HIGH: u16 = 0x300a;
+pub(crate) const PID_LOW: u16 = 0x300b;
+pub(crate) const DRIVE_CAPABILITY: u16 = 0x302c;
+pub(crate) const CLOCK_POL_CONTROL: u16 = 0x4740;
+pub(crate) const FORMAT_CTRL: u16 = 0x501f;
+pub(crate) const FORMAT_CTRL00: u16 = 0x4300;
+pub(crate) const X_ADDR_START: u16 = 0x3800;
+pub(crate) const X_ADDR_END: u16 = 0x3804;
+pub(crate) const X_OUTPUT_SIZE: u16 = 0x3808;
+pub(crate) const X_TOTAL_SIZE: u16 = 0x380c;
+pub(crate) const X_OFFSET: u16 = 0x3810;
+pub(crate) const X_INCREMENT: u16 = 0x3814;
+pub(crate) const Y_INCREMENT: u16 = 0x3815;
+pub(crate) const TIMING_TC_REG20: u16 = 0x3820;
+pub(crate) const TIMING_TC_REG21: u16 = 0x3821;
+pub(crate) const PCLK_RATIO: u16 = 0x3824;
+pub(crate) const COMPRESSION_CTRL07: u16 = 0x4407;
+pub(crate) const VFIFO_CTRL0C: u16 = 0x460c;
+pub(crate) const ISP_CONTROL_01: u16 = 0x5001;
+pub(crate) const SC_PLLS_CTRL0: u16 = 0x303a;
+pub(crate) const SC_PLLS_CTRL1: u16 = 0x303b;
+pub(crate) const SC_PLLS_CTRL2: u16 = 0x303c;
+pub(crate) const SC_PLLS_CTRL3: u16 = 0x303d;
+// Modified from the attributed upstream implementation for this crate.

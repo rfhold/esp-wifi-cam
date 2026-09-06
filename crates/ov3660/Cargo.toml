@@ -1,0 +1,15 @@
+[package]
+name = "ov3660"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0 AND MIT"
+publish = false
+
+[features]
+default = []
+esp32s3 = ["dep:embassy-time", "dep:esp-hal"]
+
+[dependencies]
+embassy-time = { version = "0.5.0", optional = true }
+embedded-hal = "1.0.0"
+esp-hal = { git = "https://github.com/esp-rs/esp-hal", tag = "esp-hal-v1.2.0", features = ["esp32s3", "unstable"], optional = true }

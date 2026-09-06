@@ -1076,10 +1076,13 @@ dependencies = [
 name = "esp-wifi-cam"
 version = "0.1.0"
 dependencies = [
+ "allocator-api2",
  "defmt 1.1.1",
  "embassy-executor",
  "embassy-net",
+ "embassy-sync 0.8.0",
  "embassy-time",
+ "embedded-io-async 0.7.0",
  "esp-alloc",
  "esp-backtrace",
  "esp-bootloader-esp-idf",
@@ -1087,6 +1090,8 @@ dependencies = [
  "esp-println",
  "esp-radio",
  "esp-rtos",
+ "heapless 0.9.3",
+ "ov3660",
  "static_cell",
 ]
 
@@ -1644,6 +1649,15 @@ name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
+
+[[package]]
+name = "ov3660"
+version = "0.1.0"
+dependencies = [
+ "embassy-time",
+ "embedded-hal 1.0.0",
+ "esp-hal",
+]
 
 [[package]]
 name = "paste"

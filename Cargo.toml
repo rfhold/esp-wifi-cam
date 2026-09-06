@@ -4,11 +4,18 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+[workspace]
+members = ["crates/ov3660"]
+resolver = "3"
+
 [dependencies]
+allocator-api2 = { version = "0.3.0", default-features = false, features = ["alloc"] }
 defmt = "1.1"
 embassy-executor = "0.10.0"
-embassy-net = { version = "0.9.0", features = ["dhcpv4", "dhcpv4-hostname", "medium-ethernet"] }
+embassy-net = { version = "0.9.0", features = ["dhcpv4", "dhcpv4-hostname", "medium-ethernet", "tcp"] }
+embassy-sync = "0.8.0"
 embassy-time = "0.5.0"
+embedded-io-async = "0.7.0"
 esp-alloc = { git = "https://github.com/esp-rs/esp-hal", tag = "esp-hal-v1.2.0", features = ["esp32s3"] }
 esp-backtrace = { git = "https://github.com/esp-rs/esp-hal", tag = "esp-hal-v1.2.0", features = ["defmt", "esp32s3", "panic-handler"] }
 esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal", tag = "esp-hal-v1.2.0", features = ["esp32s3"] }
@@ -16,6 +23,8 @@ esp-hal = { git = "https://github.com/esp-rs/esp-hal", tag = "esp-hal-v1.2.0", f
 esp-println = { git = "https://github.com/esp-rs/esp-hal", tag = "esp-hal-v1.2.0", features = ["defmt-espflash", "esp32s3"] }
 esp-radio = { git = "https://github.com/esp-rs/esp-hal", tag = "esp-hal-v1.2.0", features = ["defmt", "esp32s3", "wifi"] }
 esp-rtos = { git = "https://github.com/esp-rs/esp-hal", tag = "esp-hal-v1.2.0", features = ["defmt", "embassy", "esp-radio", "esp32s3"] }
+heapless = "0.9.1"
+ov3660 = { path = "crates/ov3660", features = ["esp32s3"] }
 static_cell = "2.1.0"
 
 [profile.release]

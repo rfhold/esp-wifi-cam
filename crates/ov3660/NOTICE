@@ -1,0 +1,16 @@
+This crate includes code and register data translated from esp32-camera
+v2.1.7, Copyright 2015-2016 Espressif Systems (Shanghai) PTE LTD, licensed
+under the Apache License, Version 2.0.
+
+Portions of the OV3660 driver originated in the OpenMV project:
+Copyright (c) 2013/2014 Ibrahim Abdelkader <i.abdalkader@gmail.com>.
+Those portions were made available under the MIT License reproduced in
+LICENSE-MIT.
+
+The ESP32-S3 LCD_CAM/GDMA capture implementation and streaming JPEG parser
+were adapted from esp32s3-cam-async 0.1.0, Copyright (c) 2024 Carlos Barrales
+Ruiz <cbruiz@gmail.com>, licensed under either the MIT License reproduced in
+LICENSE-MIT or the Apache License, Version 2.0.
+
+The files in src/ are modified Rust translations or adaptations rather than
+unmodified copies of the attributed upstream sources.
