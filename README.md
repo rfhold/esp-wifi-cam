@@ -17,9 +17,11 @@ Export these required variables before a build or compile check:
 | --- | --- |
 | `SSID` | Wi-Fi network name |
 | `PASSWORD` | WPA2-Personal password |
-| `HOSTNAME` | DHCP Option 12 hostname |
+| `HOSTNAME_PREFIX` | Stable fleet prefix for the DHCP Option 12 hostname; maximum 25 bytes |
 
 The compiler embeds these values in the firmware. Credentials can remain recoverable from firmware binaries and other build artifacts.
+
+At runtime, the firmware appends a hyphen and the final three station MAC bytes as exactly six lowercase hexadecimal characters. For example, `HOSTNAME_PREFIX=argus` and a station MAC ending in `a1:b2:c3` produce `argus-a1b2c3`. The 25-byte prefix limit keeps the generated hostname within Embassy's 32-byte DHCP hostname capacity.
 
 Never commit credentials. The repository ignores `.env`, but Cargo does not load that file automatically.
 
@@ -28,7 +30,7 @@ Never commit credentials. The repository ignores `.env`, but Cargo does not load
 Build the release firmware after the required variables exist in the shell:
 
 ```sh
-cargo build --release
+SSID=test PASSWORD=test HOSTNAME_PREFIX=argus cargo build --release
 ```
 
 Flash and monitor an attached ESP32-S3:

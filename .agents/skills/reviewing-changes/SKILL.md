@@ -34,7 +34,7 @@ Keep the review read-only and report findings first.
 ## Validation Evidence
 
 - Inspect evidence for `cargo fmt --check` and `cargo check --release` when the change affects Rust source.
-- Require `SSID`, `PASSWORD`, and `HOSTNAME` for compile-check evidence.
+- Require `SSID`, `PASSWORD`, and `HOSTNAME_PREFIX` for compile-check evidence.
 - Do not describe an unrun or unavailable check as successful.
 - Do not treat compilation as proof of Wi-Fi, DHCP, or device behavior.
 

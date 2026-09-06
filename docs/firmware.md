@@ -21,9 +21,11 @@ The firmware uses `esp-hal` for hardware initialization and `esp-rtos` for the E
 | --- | --- | --- |
 | `SSID` | Wi-Fi station network name | Required at compile time |
 | `PASSWORD` | WPA2-Personal credential | Required at compile time |
-| `HOSTNAME` | DHCPv4 Option 12 hostname | Required at compile time |
+| `HOSTNAME_PREFIX` | Stable fleet prefix for the DHCPv4 Option 12 hostname | Required at compile time; maximum 25 bytes |
 
 The compiler embeds all three values in firmware artifacts. The password can remain recoverable from binaries and other artifacts.
+
+The firmware derives the complete hostname at runtime as `<HOSTNAME_PREFIX>-<suffix>`. The suffix is exactly six lowercase hexadecimal characters formed directly from station MAC bytes 3, 4, and 5, in that order. For example, prefix `argus` and a station MAC ending in `a1:b2:c3` produce `argus-a1b2c3`. The prefix is limited to 25 bytes so the hyphen and six-character suffix fit Embassy's 32-byte DHCP hostname capacity.
 
 The repository ignores `.env`. Cargo does not load `.env` without a separate shell or tool step.
 
@@ -33,7 +35,7 @@ The repository ignores `.env`. Cargo does not load `.env` without a separate she
 2. The firmware allocates reclaimed RAM and a second heap region.
 3. ESP-RTOS starts from the first timer in `TIMG0`.
 4. The radio configures a WPA2-Personal station from `SSID` and `PASSWORD`.
-5. Embassy networking requests DHCPv4 configuration and sends `HOSTNAME` as DHCP Option 12.
+5. The firmware reads the station MAC from eFuse, derives the hostname from `HOSTNAME_PREFIX` and the final three MAC bytes, then sends it as DHCP Option 12 while requesting DHCPv4 configuration.
 6. Separate tasks drive Wi-Fi connection management and the network stack.
 7. The main task waits for IPv4 configuration and logs the acquired address and prefix through defmt.
 8. After a failure or disconnect, the Wi-Fi task waits five seconds before another connection attempt.
@@ -44,7 +46,8 @@ The current firmware does not implement camera capture, image transport, an appl
 ## Failure Behavior
 
 - A missing compile-time variable stops compilation.
-- A failed fixed-capacity conversion causes a startup panic.
+- A `HOSTNAME_PREFIX` longer than 25 bytes causes a startup panic before DHCP configuration.
+- A failed fixed-capacity hostname conversion causes a startup panic.
 - Wi-Fi connection failures produce defmt warnings and enter the five-second retry cycle.
 - A disconnect produces a defmt warning and enters the same retry cycle.
 - The main task waits indefinitely when DHCPv4 never supplies network configuration.
@@ -60,11 +63,11 @@ The current firmware does not implement camera capture, image transport, an appl
 
 ## Validation
 
-Run local checks from the repository root. `cargo fmt --check` needs no firmware variables. `cargo check --release` requires `SSID`, `PASSWORD`, and `HOSTNAME`.
+Run local checks from the repository root. `cargo fmt --check` needs no firmware variables. `cargo check --release` requires `SSID`, `PASSWORD`, and `HOSTNAME_PREFIX`.
 
 ```sh
 cargo fmt --check
-cargo check --release
+SSID=test PASSWORD=test HOSTNAME_PREFIX=argus cargo check --release
 ```
 
 Use non-production values for local checks. Do not record values in command output or documentation.

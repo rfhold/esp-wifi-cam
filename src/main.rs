@@ -1,12 +1,21 @@
 #![no_std]
 #![no_main]
 
+extern crate alloc;
+
+use alloc::format;
 use embassy_executor::Spawner;
 use embassy_net::{Runner, StackResources};
 use embassy_time::{Duration, Timer};
 use esp_alloc as _;
 use esp_backtrace as _;
-use esp_hal::{clock::CpuClock, ram, rng::Rng, timer::timg::TimerGroup};
+use esp_hal::{
+    clock::CpuClock,
+    efuse::{self, InterfaceMacAddress},
+    ram,
+    rng::Rng,
+    timer::timg::TimerGroup,
+};
 use esp_println as _;
 use esp_radio::wifi::{
     AuthenticationMethodConfig, Config, ControllerConfig, Interface, WifiController,
@@ -24,7 +33,7 @@ macro_rules! mk_static {
 
 const SSID: &str = env!("SSID");
 const PASSWORD: &str = env!("PASSWORD");
-const HOSTNAME: &str = env!("HOSTNAME");
+const HOSTNAME_PREFIX: &str = env!("HOSTNAME_PREFIX");
 
 #[esp_hal::main]
 async fn main(spawner: Spawner) -> ! {
@@ -52,8 +61,18 @@ async fn main(spawner: Spawner) -> ! {
     )
     .unwrap();
 
+    assert!(
+        HOSTNAME_PREFIX.len() <= 25,
+        "HOSTNAME_PREFIX must be at most 25 bytes"
+    );
+    let station_mac = efuse::interface_mac_address(InterfaceMacAddress::Station);
+    let station_mac_bytes = station_mac.as_bytes();
+    let hostname = format!(
+        "{HOSTNAME_PREFIX}-{:02x}{:02x}{:02x}",
+        station_mac_bytes[3], station_mac_bytes[4], station_mac_bytes[5]
+    );
     let mut dhcp_config = embassy_net::DhcpConfig::default();
-    dhcp_config.hostname = Some(HOSTNAME.try_into().unwrap());
+    dhcp_config.hostname = Some(hostname.as_str().try_into().unwrap());
     let network_config = embassy_net::Config::dhcpv4(dhcp_config);
     let rng = Rng::new();
     let seed = (rng.random() as u64) << 32 | rng.random() as u64;
