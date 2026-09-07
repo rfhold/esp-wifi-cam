@@ -174,7 +174,7 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(connection(controller).unwrap());
     spawner.spawn(net_task(runner).unwrap());
     spawner.spawn(camera_task(camera, i2c).unwrap());
-    spawner.spawn(http_server(stack).unwrap());
+    spawner.spawn(http_server(stack, provisioning.track.as_str()).unwrap());
     spawner.spawn(ota::ota_task(stack, flash, provisioning, seed).unwrap());
 
     stack.wait_config_up().await;
@@ -344,7 +344,7 @@ fn report_capture_metrics(
 }
 
 #[embassy_executor::task]
-async fn http_server(stack: embassy_net::Stack<'static>) {
+async fn http_server(stack: embassy_net::Stack<'static>, track: &'static str) {
     let mut rx_buffer = [0u8; 1024];
     let mut tx_buffer = [0u8; 4 * 1024];
     loop {
@@ -367,7 +367,7 @@ async fn http_server(stack: embassy_net::Stack<'static>) {
             Timer::after(Duration::from_millis(250)).await;
             continue;
         }
-        if handle_http_connection(&mut socket).await.is_err() {
+        if handle_http_connection(&mut socket, track).await.is_err() {
             defmt::warn!("HTTP connection closed");
             socket.abort();
             let _ = with_timeout(Duration::from_secs(1), socket.flush()).await;
@@ -379,7 +379,10 @@ async fn http_server(stack: embassy_net::Stack<'static>) {
     }
 }
 
-async fn handle_http_connection(socket: &mut TcpSocket<'_>) -> Result<(), embassy_net::tcp::Error> {
+async fn handle_http_connection(
+    socket: &mut TcpSocket<'_>,
+    track: &'static str,
+) -> Result<(), embassy_net::tcp::Error> {
     if ota::TRANSFER_ACTIVE.load(core::sync::atomic::Ordering::Acquire) {
         return socket
             .write_all(
@@ -404,6 +407,7 @@ async fn handle_http_connection(socket: &mut TcpSocket<'_>) -> Result<(), embass
     match &request[..line_end] {
         b"GET /stream HTTP/1.0" | b"GET /stream HTTP/1.1" => stream_mjpeg(socket).await,
         b"GET /capture.jpg HTTP/1.0" | b"GET /capture.jpg HTTP/1.1" => send_snapshot(socket).await,
+        b"GET /status HTTP/1.0" | b"GET /status HTTP/1.1" => send_status(socket, track).await,
         _ => {
             socket
                 .write_all(
@@ -412,6 +416,29 @@ async fn handle_http_connection(socket: &mut TcpSocket<'_>) -> Result<(), embass
                 .await
         }
     }
+}
+
+async fn send_status(
+    socket: &mut TcpSocket<'_>,
+    track: &'static str,
+) -> Result<(), embassy_net::tcp::Error> {
+    let transfer_active = ota::TRANSFER_ACTIVE.load(core::sync::atomic::Ordering::Acquire);
+    let mut body: String<128> = String::new();
+    let _ = write!(
+        body,
+        "{{\"version\":\"{}\",\"track\":\"{}\",\"transfer_active\":{}}}",
+        env!("CARGO_PKG_VERSION"),
+        track,
+        transfer_active
+    );
+    let mut headers: String<160> = String::new();
+    let _ = write!(
+        headers,
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    socket.write_all(headers.as_bytes()).await?;
+    socket.write_all(body.as_bytes()).await
 }
 
 async fn stream_mjpeg(socket: &mut TcpSocket<'_>) -> Result<(), embassy_net::tcp::Error> {

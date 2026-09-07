@@ -35,7 +35,7 @@ The DHCP hostname is `esp-cam-<suffix>`, where `suffix` is six lowercase hexadec
 3. The OV3660 receives a 10 MHz XCLK and is configured for Full HD (`1920x1080`) JPEG at quality 12, vertical flip, brightness `+1`, and saturation `-2`.
 4. LCD_CAM and GDMA capture into a 20 KiB internal-RAM ring. Two bounded 512 KiB PSRAM buffers retain complete JPEG frames.
 5. DHCPv4 uses the derived hostname. Separate tasks drive Wi-Fi, networking, capture, HTTP, and OTA.
-6. `/capture.jpg` returns the next complete JPEG. `/stream` returns MJPEG with the `frameboundary` boundary. Other targets return `404 Not Found`.
+6. `/capture.jpg` returns the next complete JPEG. `/stream` returns MJPEG with the `frameboundary` boundary. `GET /status` returns a compact `application/json` object containing the compiled `version`, configured `track`, and `transfer_active` boolean. The status response contains no credentials, signing material, manifest URLs, asset paths, or asset digests. Other targets return `404 Not Found`.
 7. The camera signals health only after initialization and one complete JPEG frame. Only then may the OTA task mark a `New` or `PendingVerify` image `Valid`.
 8. The first update check starts 30 seconds after health confirmation and later checks run every six hours while network configuration is available.
 
