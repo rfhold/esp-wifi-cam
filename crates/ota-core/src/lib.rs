@@ -14,11 +14,15 @@ pub const MANIFEST_DOMAIN: &[u8] = b"esp-wifi-cam-ota-manifest-v1\0";
 pub const MANIFEST_MAX_LEN: usize = 1536;
 pub const CANONICAL_MAX_LEN: usize = 768;
 pub const PROVISION_RECORD_LEN: usize = 160;
+pub const OTA_IGNORE_RECORD_LEN: usize = 96;
+pub const OTA_IGNORE_VERSION_MAX_LEN: usize = 48;
 pub const SSID_MAX_LEN: usize = 32;
 pub const PASSWORD_MAX_LEN: usize = 63;
 
 const PROVISION_MAGIC: &[u8; 8] = b"EWCAM-P1";
 const PROVISION_SCHEMA: u8 = 1;
+const OTA_IGNORE_MAGIC: &[u8; 8] = b"EWCAM-O1";
+const OTA_IGNORE_SCHEMA: u8 = 1;
 const ED25519_SPKI_PREFIX: &[u8; 12] = &[
     0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
 ];
@@ -56,6 +60,12 @@ pub struct Provisioning {
     pub track: Track,
     pub ssid: String<SSID_MAX_LEN>,
     pub password: String<PASSWORD_MAX_LEN>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OtaIgnoreRecord {
+    pub sequence: u32,
+    pub version: Option<String<OTA_IGNORE_VERSION_MAX_LEN>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -207,6 +217,83 @@ pub fn newest_provision_record(
         (Err(_), Ok(b)) => Ok((b, 1)),
         (Err(_), Err(_)) => Err(Error::Provision),
     }
+}
+
+pub fn encode_ota_ignore_record(
+    record: &OtaIgnoreRecord,
+) -> Result<[u8; OTA_IGNORE_RECORD_LEN], Error> {
+    let mut encoded = [0xff; OTA_IGNORE_RECORD_LEN];
+    encoded[..8].copy_from_slice(OTA_IGNORE_MAGIC);
+    encoded[8] = OTA_IGNORE_SCHEMA;
+    encoded[9] = if record.version.is_some() { 1 } else { 0 };
+    encoded[10..14].copy_from_slice(&record.sequence.to_le_bytes());
+    encoded[14] = 0;
+    if let Some(version) = &record.version {
+        validate_ignore_version(version)?;
+        encoded[14] = version.len() as u8;
+        encoded[16..16 + version.len()].copy_from_slice(version.as_bytes());
+    }
+    let digest = Sha256::digest(&encoded[..64]);
+    encoded[64..].copy_from_slice(&digest);
+    Ok(encoded)
+}
+
+pub fn decode_ota_ignore_record(record: &[u8]) -> Result<OtaIgnoreRecord, Error> {
+    if record.len() != OTA_IGNORE_RECORD_LEN
+        || &record[..8] != OTA_IGNORE_MAGIC
+        || record[8] != OTA_IGNORE_SCHEMA
+    {
+        return Err(Error::Provision);
+    }
+    if Sha256::digest(&record[..64]).as_slice() != &record[64..] {
+        return Err(Error::Hash);
+    }
+    let version = match record[9] {
+        0 if record[14] == 0 => None,
+        1 => {
+            let length = record[14] as usize;
+            if length == 0 || length > OTA_IGNORE_VERSION_MAX_LEN {
+                return Err(Error::Version);
+            }
+            let version =
+                core::str::from_utf8(&record[16..16 + length]).map_err(|_| Error::Utf8)?;
+            validate_ignore_version(version)?;
+            Some(version.try_into().map_err(|_| Error::Bounds)?)
+        }
+        _ => return Err(Error::Provision),
+    };
+    Ok(OtaIgnoreRecord {
+        sequence: u32::from_le_bytes(record[10..14].try_into().map_err(|_| Error::Bounds)?),
+        version,
+    })
+}
+
+pub fn newest_ota_ignore_record(
+    first: &[u8],
+    second: &[u8],
+) -> Result<(OtaIgnoreRecord, usize), Error> {
+    match (
+        decode_ota_ignore_record(first),
+        decode_ota_ignore_record(second),
+    ) {
+        (Ok(a), Ok(b)) if sequence_is_newer(b.sequence, a.sequence) => Ok((b, 1)),
+        (Ok(a), Ok(_)) => Ok((a, 0)),
+        (Ok(a), Err(_)) => Ok((a, 0)),
+        (Err(_), Ok(b)) => Ok((b, 1)),
+        (Err(_), Err(_)) => Err(Error::Provision),
+    }
+}
+
+pub fn validate_ignore_version(value: &str) -> Result<(), Error> {
+    if value.len() > OTA_IGNORE_VERSION_MAX_LEN {
+        return Err(Error::Bounds);
+    }
+    let version = Version::parse(value).map_err(|_| Error::Version)?;
+    if !version.build.is_empty() || (!version.pre.is_empty() && !is_exact_rc(version.pre.as_str()))
+    {
+        return Err(Error::Policy);
+    }
+    Ok(())
 }
 
 pub fn remaining_window_ticks(start: u64, now: u64, window: u64) -> Option<u64> {
@@ -409,6 +496,65 @@ mod tests {
         let mut corrupt = valid;
         corrupt[20] ^= 1;
         assert_eq!(newest_provision_record(&corrupt, &valid).unwrap().1, 1);
+    }
+
+    #[test]
+    fn ota_ignore_record_round_trips_and_selects_newest() {
+        let older = encode_ota_ignore_record(&OtaIgnoreRecord {
+            sequence: 4,
+            version: Some("1.2.3".try_into().unwrap()),
+        })
+        .unwrap();
+        let newer = encode_ota_ignore_record(&OtaIgnoreRecord {
+            sequence: 5,
+            version: Some("1.2.4-rc.1".try_into().unwrap()),
+        })
+        .unwrap();
+        assert_eq!(
+            newest_ota_ignore_record(&older, &newer).unwrap(),
+            (
+                OtaIgnoreRecord {
+                    sequence: 5,
+                    version: Some("1.2.4-rc.1".try_into().unwrap()),
+                },
+                1
+            )
+        );
+    }
+
+    #[test]
+    fn ota_ignore_corruption_and_clear_are_handled() {
+        let clear = encode_ota_ignore_record(&OtaIgnoreRecord {
+            sequence: 8,
+            version: None,
+        })
+        .unwrap();
+        let mut corrupt = clear;
+        corrupt[20] ^= 1;
+        assert_eq!(decode_ota_ignore_record(&corrupt), Err(Error::Hash));
+        assert_eq!(decode_ota_ignore_record(&clear).unwrap().version, None);
+    }
+
+    #[test]
+    fn ota_ignore_rejects_unaccepted_versions() {
+        for version in ["1.2.3+build", "1.2.3-beta.1", "1.2.3-rc.01"] {
+            let record = OtaIgnoreRecord {
+                sequence: 1,
+                version: Some(version.try_into().unwrap()),
+            };
+            assert!(encode_ota_ignore_record(&record).is_err());
+        }
+
+        let mut encoded = encode_ota_ignore_record(&OtaIgnoreRecord {
+            sequence: 1,
+            version: Some("1.2.3".try_into().unwrap()),
+        })
+        .unwrap();
+        encoded[14] = 11;
+        encoded[16..27].copy_from_slice(b"1.2.3+build");
+        let digest = Sha256::digest(&encoded[..64]);
+        encoded[64..].copy_from_slice(&digest);
+        assert_eq!(decode_ota_ignore_record(&encoded), Err(Error::Policy));
     }
 
     #[test]

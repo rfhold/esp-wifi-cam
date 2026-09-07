@@ -3,7 +3,10 @@
 
 extern crate alloc;
 
-use core::fmt::Write as _;
+use core::{
+    fmt::Write as _,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use alloc::format;
 use allocator_api2::vec::Vec;
@@ -22,6 +25,7 @@ use esp_hal::{
     dma_rx_stream_buffer,
     efuse::{self, InterfaceMacAddress},
     i2c::master::{Config as I2cConfig, I2c},
+    i2s::master::{I2s, I2sRx, PdmConfig, PdmRxConfig, PdmSlotMode},
     lcd_cam::{
         ByteOrder,
         cam::{Config as CamConfig, EofMode, VhdeMode, VsyncFilterThreshold},
@@ -61,15 +65,28 @@ const DMA_RING: usize = 20 * 1024;
 const DMA_BLOCK: usize = 1024;
 const DMA_CHUNK: usize = 4 * 1024;
 const HTTP_BOUNDARY: &str = "frameboundary";
+const AUDIO_SAMPLE_RATE_HZ: u32 = 16_000;
+const AUDIO_DMA_RING: usize = 4092 * 8;
+const AUDIO_DMA_BLOCK: usize = 2048;
+const AUDIO_CHUNK: usize = 1024;
+const AUDIO_BUFFERED_CHUNKS: usize = 8;
 
 struct FrameBuffer {
     data: Vec<u8, &'static esp_alloc::EspHeap>,
     len: usize,
 }
 
+struct AudioChunk {
+    data: [u8; AUDIO_CHUNK],
+    len: usize,
+}
+
 static PSRAM_HEAP: esp_alloc::EspHeap = esp_alloc::EspHeap::empty();
 static EMPTY_FRAMES: Channel<CriticalSectionRawMutex, FrameBuffer, 2> = Channel::new();
 static READY_FRAMES: Channel<CriticalSectionRawMutex, FrameBuffer, 2> = Channel::new();
+static PCM_CHUNKS: Channel<CriticalSectionRawMutex, AudioChunk, AUDIO_BUFFERED_CHUNKS> =
+    Channel::new();
+static AUDIO_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 #[esp_hal::main]
 async fn main(spawner: Spawner) -> ! {
@@ -133,6 +150,17 @@ async fn main(spawner: Spawner) -> ! {
         peripherals.GPIO48,
     )
     .unwrap();
+    let pdm_config = PdmConfig::rx_only(PdmRxConfig::new_pcm_default(
+        Rate::from_hz(AUDIO_SAMPLE_RATE_HZ),
+        PdmSlotMode::Mono,
+    ));
+    let audio = I2s::new_pdm(peripherals.I2S0, peripherals.DMA_CH1, pdm_config)
+        .unwrap()
+        .into_async()
+        .i2s_rx
+        .with_clk(peripherals.GPIO42)
+        .with_din(peripherals.GPIO41)
+        .build();
     let i2c = I2c::new(peripherals.I2C0, I2cConfig::default())
         .unwrap()
         .with_scl(peripherals.GPIO39)
@@ -174,6 +202,8 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(connection(controller).unwrap());
     spawner.spawn(net_task(runner).unwrap());
     spawner.spawn(camera_task(camera, i2c).unwrap());
+    spawner.spawn(audio_capture_task(audio).unwrap());
+    spawner.spawn(http_server(stack, provisioning.track.as_str()).unwrap());
     spawner.spawn(http_server(stack, provisioning.track.as_str()).unwrap());
     spawner.spawn(http_server(stack, provisioning.track.as_str()).unwrap());
     spawner.spawn(ota::ota_task(stack, flash, provisioning, seed).unwrap());
@@ -318,6 +348,46 @@ async fn camera_task(camera: AsyncCameraDriver<'static>, i2c: I2c<'static, Block
     }
 }
 
+#[embassy_executor::task]
+async fn audio_capture_task(audio: I2sRx<'static, esp_hal::Async>) {
+    let dma_buffer = dma_rx_stream_buffer!(AUDIO_DMA_RING, AUDIO_DMA_BLOCK);
+    let mut transaction = audio.read(dma_buffer).unwrap();
+
+    loop {
+        if transaction.wait_for_available_async().await.is_err() {
+            // Descriptor exhaustion stops DMA; reset the transfer with its reusable buffer.
+            let (mut audio, mut dma_buffer) = transaction.stop();
+            loop {
+                match audio.read(dma_buffer) {
+                    Ok(restarted) => {
+                        transaction = restarted;
+                        break;
+                    }
+                    Err((_, returned_audio, returned_dma_buffer)) => {
+                        audio = returned_audio;
+                        dma_buffer = returned_dma_buffer;
+                        Timer::after(Duration::from_millis(100)).await;
+                    }
+                }
+            }
+            continue;
+        }
+        while transaction.available_bytes() > 0 {
+            let mut chunk = AudioChunk {
+                data: [0; AUDIO_CHUNK],
+                len: 0,
+            };
+            chunk.len = transaction.pop(&mut chunk.data) & !1;
+            if chunk.len == 0 {
+                break;
+            }
+
+            // The producer never waits: when full, drop the newest PCM chunk.
+            let _ = PCM_CHUNKS.try_send(chunk);
+        }
+    }
+}
+
 fn report_capture_metrics(
     metrics_at: &mut Instant,
     frames: &mut u32,
@@ -344,7 +414,7 @@ fn report_capture_metrics(
     *metrics_at = Instant::now();
 }
 
-#[embassy_executor::task(pool_size = 2)]
+#[embassy_executor::task(pool_size = 3)]
 async fn http_server(stack: embassy_net::Stack<'static>, track: &'static str) {
     let mut rx_buffer = [0u8; 1024];
     let mut tx_buffer = [0u8; 4 * 1024];
@@ -409,6 +479,21 @@ async fn handle_http_connection(
         b"GET /stream HTTP/1.0" | b"GET /stream HTTP/1.1" => stream_mjpeg(socket).await,
         b"GET /capture.jpg HTTP/1.0" | b"GET /capture.jpg HTTP/1.1" => send_snapshot(socket).await,
         b"GET /status HTTP/1.0" | b"GET /status HTTP/1.1" => send_status(socket, track).await,
+        b"GET /audio.pcm HTTP/1.0" | b"GET /audio.pcm HTTP/1.1" => {
+            if AUDIO_ACTIVE
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                .is_err()
+            {
+                return socket
+                    .write_all(
+                        b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    )
+                    .await;
+            }
+            let result = stream_audio(socket).await;
+            AUDIO_ACTIVE.store(false, Ordering::Release);
+            result
+        }
         _ => {
             socket
                 .write_all(
@@ -481,6 +566,25 @@ async fn stream_mjpeg(socket: &mut TcpSocket<'_>) -> Result<(), embassy_net::tcp
         .await;
         assert!(EMPTY_FRAMES.try_send(frame).is_ok());
         result?;
+    }
+}
+
+async fn stream_audio(socket: &mut TcpSocket<'_>) -> Result<(), embassy_net::tcp::Error> {
+    socket
+        .write_all(
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+        )
+        .await?;
+
+    loop {
+        if ota::TRANSFER_ACTIVE.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        let chunk = match with_timeout(Duration::from_secs(1), PCM_CHUNKS.receive()).await {
+            Ok(chunk) => chunk,
+            Err(_) => continue,
+        };
+        socket.write_all(&chunk.data[..chunk.len]).await?;
     }
 }
 

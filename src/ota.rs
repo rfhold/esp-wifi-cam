@@ -27,6 +27,9 @@ use reqwless::{
 use sha2::{Digest, Sha256};
 use static_cell::StaticCell;
 
+#[path = "ota_ignore.rs"]
+mod ota_ignore;
+
 const HTTPS_ORIGIN: &str = "https://git.holdenitdown.net";
 const FIRST_CHECK_DELAY: Duration = Duration::from_secs(30);
 const STABLE_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
@@ -167,6 +170,10 @@ async fn check_and_install(
     )
     .map_err(|_| ())?;
     defmt::info!("OTA manifest verified");
+    if ota_ignore::ignored_version(flash).as_ref() == Some(&manifest.version) {
+        defmt::info!("OTA manifest version locally ignored: {}", manifest.version);
+        return Ok(false);
+    }
     install_image(
         tcp,
         dns,

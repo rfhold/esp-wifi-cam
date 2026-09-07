@@ -11,7 +11,10 @@ use ed25519_dalek::{
     Signer, SigningKey,
     pkcs8::{DecodePrivateKey, EncodePublicKey},
 };
-use ota_core::{BOARD, MANIFEST_DOMAIN, MANIFEST_MAX_LEN, TARGET, Track};
+use ota_core::{
+    BOARD, MANIFEST_DOMAIN, MANIFEST_MAX_LEN, OTA_IGNORE_RECORD_LEN, OtaIgnoreRecord, TARGET,
+    Track, encode_ota_ignore_record, validate_ignore_version,
+};
 use semver::Version;
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
@@ -31,6 +34,12 @@ pub struct Arguments {
     pub public_key_path: PathBuf,
     pub private_key_path: PathBuf,
     pub max_slot_length: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IgnoreRecordArguments {
+    pub version: Option<String>,
+    pub output_path: PathBuf,
 }
 
 #[derive(Debug)]
@@ -115,6 +124,86 @@ where
     };
     validate_release_fields(&arguments)?;
     Ok(arguments)
+}
+
+pub fn parse_ignore_record_arguments<I, S>(arguments: I) -> Result<IgnoreRecordArguments, Error>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<OsString>,
+{
+    let mut values = arguments.into_iter().map(Into::into);
+    let _program = values.next();
+    let _subcommand = values.next();
+    let mut version = None;
+    let mut clear = false;
+    let mut output_path = None;
+
+    while let Some(flag) = values.next() {
+        let flag = os_string(flag)?;
+        match flag.as_str() {
+            "--version" => {
+                let value = values
+                    .next()
+                    .ok_or(Error::Argument("--version requires a value"))?;
+                set_once(&mut version, os_string(value)?)?;
+            }
+            "--clear" => {
+                if clear {
+                    return Err(Error::Argument("duplicate --clear"));
+                }
+                clear = true;
+            }
+            "--output" => {
+                let value = values
+                    .next()
+                    .ok_or(Error::Argument("--output requires a value"))?;
+                set_once(&mut output_path, PathBuf::from(value))?;
+            }
+            _ => return Err(Error::Argument("unknown flag")),
+        }
+    }
+
+    if clear == version.is_some() {
+        return Err(Error::Argument(
+            "provide exactly one of --version or --clear",
+        ));
+    }
+    if let Some(version) = &version {
+        validate_ignore_version(version)
+            .map_err(|_| Error::Argument("version is not an accepted OTA SemVer"))?;
+    }
+    let output_path = required(output_path, "missing --output")?;
+    if output_path.as_os_str().is_empty() {
+        return Err(Error::Argument("output path must not be empty"));
+    }
+    Ok(IgnoreRecordArguments {
+        version,
+        output_path,
+    })
+}
+
+pub fn generate_ignore_record(arguments: &IgnoreRecordArguments) -> Result<PathBuf, Error> {
+    if let Some(version) = &arguments.version {
+        validate_ignore_version(version)
+            .map_err(|_| Error::Argument("version is not an accepted OTA SemVer"))?;
+    }
+    let version = arguments
+        .version
+        .as_deref()
+        .map(|version| {
+            version
+                .try_into()
+                .map_err(|_| Error::Argument("version is too long"))
+        })
+        .transpose()?;
+    let record = encode_ota_ignore_record(&OtaIgnoreRecord {
+        sequence: 1,
+        version,
+    })
+    .map_err(|_| Error::Argument("version is not an accepted OTA SemVer"))?;
+    debug_assert_eq!(record.len(), OTA_IGNORE_RECORD_LEN);
+    atomic_write(&arguments.output_path, &record)?;
+    Ok(arguments.output_path.clone())
 }
 
 pub fn generate_manifest(arguments: &Arguments) -> Result<PathBuf, Error> {
@@ -486,6 +575,65 @@ mod tests {
             generate_manifest_with_fingerprint(&arguments, fixture.fingerprint),
             Err(Error::Argument(_))
         ));
+    }
+
+    #[test]
+    fn ignore_record_cli_generates_set_and_clear_records_without_keys() {
+        let directory = std::env::temp_dir().join(format!(
+            "esp-wifi-cam-ignore-record-{}-{}",
+            std::process::id(),
+            NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&directory).unwrap();
+        let output = directory.join("ignore.bin");
+        let set = parse_ignore_record_arguments([
+            "release-tool",
+            "ignore-record",
+            "--version",
+            "1.2.3-rc.1",
+            "--output",
+            output.to_str().unwrap(),
+        ])
+        .unwrap();
+        generate_ignore_record(&set).unwrap();
+        assert_eq!(fs::read(&output).unwrap().len(), OTA_IGNORE_RECORD_LEN);
+        let clear = parse_ignore_record_arguments([
+            "release-tool",
+            "ignore-record",
+            "--clear",
+            "--output",
+            output.to_str().unwrap(),
+        ])
+        .unwrap();
+        generate_ignore_record(&clear).unwrap();
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn ignore_record_cli_rejects_invalid_or_ambiguous_versions() {
+        assert!(
+            parse_ignore_record_arguments([
+                "release-tool",
+                "ignore-record",
+                "--version",
+                "1.2.3+build",
+                "--output",
+                "ignore.bin",
+            ])
+            .is_err()
+        );
+        assert!(
+            parse_ignore_record_arguments([
+                "release-tool",
+                "ignore-record",
+                "--clear",
+                "--version",
+                "1.2.3",
+                "--output",
+                "ignore.bin",
+            ])
+            .is_err()
+        );
     }
 
     #[test]

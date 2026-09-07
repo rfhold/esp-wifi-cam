@@ -49,6 +49,12 @@ The signature is encoded as unpadded base64url in the envelope. Before verificat
 
 The envelope `track` identifies the selected distribution manifest. A prerelease manifest may therefore point to either an accepted `rc.N` or stable version.
 
+## Local Ignore-Version Override
+
+`scripts/flash.sh --ignore-ota-version <semver>` creates and writes the same fixed OTA-ignore record to both reserved config-sector addresses `0xb000` and `0xc000` after its normal guarded app flash. `<semver>` must satisfy the OTA version syntax: no build metadata, and a prerelease may only be exact `rc.N`. `scripts/flash.sh --clear-ignore-ota-version` writes an explicit clear record to both addresses instead. The flags are mutually exclusive, reject invalid values through the host release tool, require `ESPFLASH_PORT` for the explicitly authorized serial port, and fail nonzero if record generation or either flash write fails. The app flash and both record writes keep the newly flashed firmware from starting; after both writes, the script resets once and starts monitoring without another reset. Temporary host record data is removed on exit.
+
+This is persistent local physical-operator state, not a release field or remotely configurable setting. The firmware fetches and verifies the manifest normally, including signature and every existing acceptance rule, before consulting the journal. It skips only the install when the stored and verified manifest version strings exactly match. A different valid signed candidate installs normally. Missing, corrupt, unreadable, or clear records do not suppress an update.
+
 ## Release Artifact
 
 Build one credential-free release binary, then create an app-only ESP-IDF image:
@@ -102,14 +108,14 @@ The shared CI image currently has no locally recorded digest, so pipeline steps 
 
 | Name | Offset | Size | Use |
 | --- | --- | --- | --- |
-| `config` | `0x9000` | `0x4000` | Two provisioning journal sectors plus reserved space |
+| `config` | `0x9000` | `0x4000` | Provisioning journals at `0x9000`/`0xa000`; local OTA-ignore journals at reserved `0xb000`/`0xc000` |
 | `otadata` | `0xd000` | `0x2000` | ESP-IDF OTA selection records |
 | `phy_init` | `0xf000` | `0x1000` | PHY initialization data |
 | `factory` | `0x10000` | `0x180000` | Initial recovery-capable application |
 | `ota_0` | `0x1a0000` | `0x330000` | OTA application slot 0 |
 | `ota_1` | `0x4d0000` | `0x330000` | OTA application slot 1 |
 
-Before reading or writing provisioning sectors, firmware requires exactly 8 MiB of flash and validates the complete listed partition table through the same implementation used by the OTA task. The unused `0x10000` alignment gap after the factory partition permits both OTA application offsets to meet ESP-IDF's `0x10000` alignment requirement. An invalid layout halts startup without provisioning or network services. With a valid layout, OTA streams exactly the signed length to the inactive slot in at most 4096-byte chunks, hashes network bytes, immediately reads each chunk back, hashes persisted bytes independently, and requires both hashes to match. Only then does it select the slot, set its state to `New`, and software-reset.
+Before reading or writing provisioning or OTA-ignore sectors, firmware requires exactly 8 MiB of flash and validates the complete listed partition table through the same implementation used by the OTA task. The unused `0x10000` alignment gap after the factory partition permits both OTA application offsets to meet ESP-IDF's `0x10000` alignment requirement. An invalid layout halts startup without provisioning or network services. With a valid layout, OTA verifies the manifest first, applies an exact local ignore-version match only after that verification, then streams an unsuppressed signed image to the inactive slot in at most 4096-byte chunks, hashes network bytes, immediately reads each chunk back, hashes persisted bytes independently, and requires both hashes to match. Only then does it select the slot, set its state to `New`, and software-reset.
 
 ## Bootloader And Confirmation
 
