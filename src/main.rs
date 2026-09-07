@@ -175,6 +175,7 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(net_task(runner).unwrap());
     spawner.spawn(camera_task(camera, i2c).unwrap());
     spawner.spawn(http_server(stack, provisioning.track.as_str()).unwrap());
+    spawner.spawn(http_server(stack, provisioning.track.as_str()).unwrap());
     spawner.spawn(ota::ota_task(stack, flash, provisioning, seed).unwrap());
 
     stack.wait_config_up().await;
@@ -343,7 +344,7 @@ fn report_capture_metrics(
     *metrics_at = Instant::now();
 }
 
-#[embassy_executor::task]
+#[embassy_executor::task(pool_size = 2)]
 async fn http_server(stack: embassy_net::Stack<'static>, track: &'static str) {
     let mut rx_buffer = [0u8; 1024];
     let mut tx_buffer = [0u8; 4 * 1024];

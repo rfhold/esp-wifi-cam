@@ -43,8 +43,9 @@ After DHCP completes, use the generated hostname or logged IPv4 address:
 | --- | --- |
 | `/capture.jpg` | One Full HD (`1920x1080`) JPEG frame |
 | `/stream` | Continuous Full HD (`1920x1080`) `multipart/x-mixed-replace` MJPEG stream |
+| `/status` | Compact JSON containing the firmware version, configured track, and OTA transfer state |
 
-New HTTP requests receive `503 Service Unavailable` during an OTA artifact transfer, and an existing stream closes at its next frame boundary. The firmware has no update upload endpoint.
+The server accepts exactly two concurrent HTTP connections, intended for one Frigate `/stream` client and one independent `/status` or `/capture.jpg` request. Concurrent `/stream` consumers compete for the camera's bounded frame buffers; they do not receive independently duplicated streams. New HTTP requests receive `503 Service Unavailable` during an OTA artifact transfer, and an existing stream closes at its next frame boundary. The firmware has no update upload endpoint.
 
 ## Repository Map
 
