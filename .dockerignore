@@ -1,0 +1,13 @@
+.git/
+.env
+.env.*
+.esp-release/
+target/
+bootloader/build/
+*.bin
+*.elf
+*.map
+*.pem
+*.key
+*.log
+secrets/

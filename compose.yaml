@@ -1,0 +1,29 @@
+name: esp-wifi-cam
+
+x-firmware-service: &firmware-service
+  image: esp-wifi-cam-toolchain
+  build:
+    context: .
+  working_dir: /workspace
+  environment:
+    CARGO_TARGET_DIR: /workspace/target
+  volumes:
+    - .:/workspace:ro
+    - cargo-registry:/opt/esp/cargo/registry
+    - cargo-git:/opt/esp/cargo/git
+    - ./target:/workspace/target
+    - ./bootloader/build:/workspace/bootloader/build
+  entrypoint:
+    - /bin/bash
+    - -c
+    - source "$$IDF_PATH/export.sh"; source /opt/esp/export-esp.sh; exec "$$@"
+    - --
+
+services:
+  build:
+    <<: *firmware-service
+    command: ["cargo", "build", "--locked", "--release"]
+
+volumes:
+  cargo-registry:
+  cargo-git:

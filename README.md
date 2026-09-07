@@ -23,6 +23,36 @@ espflash save-image --chip esp32s3 \
 
 The OTA artifact is the app-only `espflash save-image` output. Do not pass `--merge`.
 
+## Container Tooling
+
+Docker Compose provides a pinned ESP-IDF and Espressif Rust environment for firmware and custom bootloader builds. The initial image build and the first Cargo build may need network access to obtain the pinned toolchain and locked dependencies.
+
+```sh
+docker compose build
+docker compose run --rm build cargo build --locked --release
+docker compose run --rm build scripts/build-bootloader.sh
+```
+
+The workspace is read-only in the container. Docker-managed volumes retain Cargo registry and Git caches. The ignored host directories `target/` and `bootloader/build/` are the only writable workspace mounts, so the build ELF, bootloader, and checksum are available to host tools.
+
+Flashing and monitoring run on the host, not in Docker. The following command verifies the custom bootloader checksum, flashes the Docker-built ELF, and starts Defmt monitoring. It is a hardware mutation and requires explicit authorization for the exact device:
+
+```sh
+ESPFLASH_PORT=/dev/ttyACM0 ESPFLASH_SKIP_UPDATE_CHECK=true \
+  scripts/flash.sh --non-interactive \
+  target/xtensa-esp32s3-none-elf/release/esp-wifi-cam
+```
+
+To attach a later host-side Defmt monitor without flashing, use the same ELF:
+
+```sh
+ESPFLASH_PORT=/dev/ttyACM0 ESPFLASH_SKIP_UPDATE_CHECK=true \
+  espflash monitor --non-interactive --chip esp32s3 --log-format defmt \
+  --elf target/xtensa-esp32s3-none-elf/release/esp-wifi-cam
+```
+
+Set `ESPFLASH_PORT` to the authorized host serial path, such as `/dev/ttyACM0`. Set `ESPFLASH_SKIP_UPDATE_CHECK=true` and use `--non-interactive` for noninteractive host operation. The flash command preserves the bootloader checksum gate in [`scripts/flash.sh`](scripts/flash.sh); build the rollback-enabled bootloader first.
+
 `cargo run --release` invokes [`scripts/flash.sh`](scripts/flash.sh). The runner refuses to flash unless a locally built bootloader and its checksum exist, then supplies that bootloader and [`partitions.csv`](partitions.csv) to `espflash`. Flashing mutates attached hardware and requires explicit authorization.
 
 ## Provisioning

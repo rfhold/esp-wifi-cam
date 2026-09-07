@@ -18,7 +18,7 @@ use esp_bootloader_esp_idf::{
 };
 use esp_storage::FlashStorage;
 use heapless::String;
-use ota_core::{MANIFEST_MAX_LEN, Provisioning, VerifiedManifest, verify_manifest};
+use ota_core::{MANIFEST_MAX_LEN, Provisioning, Track, VerifiedManifest, verify_manifest};
 use reqwless::{
     client::{HttpClient, TlsConfig, TlsVerify},
     request::Method,
@@ -29,7 +29,8 @@ use static_cell::StaticCell;
 
 const HTTPS_ORIGIN: &str = "https://git.holdenitdown.net";
 const FIRST_CHECK_DELAY: Duration = Duration::from_secs(30);
-const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+const STABLE_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+const PRERELEASE_CHECK_INTERVAL: Duration = Duration::from_secs(60);
 const PUBLIC_KEY: &[u8] = include_bytes!("../keys/ota-public.der");
 const TLS_ROOT: &[u8] = include_bytes!("isrg-root-x1.der");
 
@@ -56,6 +57,10 @@ pub async fn ota_task(
     }
     defmt::info!("Camera health confirmed for running image");
     Timer::after(FIRST_CHECK_DELAY).await;
+    let check_interval = match provision.track {
+        Track::Stable => STABLE_CHECK_INTERVAL,
+        Track::Prerelease => PRERELEASE_CHECK_INTERVAL,
+    };
     let mut tcp = TcpClient::new(stack, TCP_STATE.init(TcpClientState::new()));
     tcp.set_timeout(Some(Duration::from_secs(30)));
     let dns = DnsSocket::new(stack);
@@ -67,7 +72,7 @@ pub async fn ota_task(
             Ok(false) => defmt::info!("OTA check complete: no accepted update"),
             Err(()) => defmt::warn!("OTA check failed closed"),
         }
-        Timer::after(CHECK_INTERVAL).await;
+        Timer::after(check_interval).await;
     }
 }
 

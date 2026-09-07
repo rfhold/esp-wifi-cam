@@ -37,7 +37,7 @@ The DHCP hostname is `esp-cam-<suffix>`, where `suffix` is six lowercase hexadec
 5. DHCPv4 uses the derived hostname. Separate tasks drive Wi-Fi, networking, capture, HTTP, and OTA.
 6. Two HTTP workers each own a fixed 1 KiB receive buffer, 4 KiB transmit buffer, and TCP socket. The server therefore accepts exactly two concurrent HTTP connections, intended for one Frigate `/stream` client and one independent `/status` or `/capture.jpg` request. `/capture.jpg` returns the next complete JPEG. `/stream` returns MJPEG with the `frameboundary` boundary. Concurrent stream consumers compete for the camera's bounded frame buffers; the firmware does not fan out or independently duplicate streams. `GET /status` returns a compact `application/json` object containing the compiled `version`, configured `track`, and `transfer_active` boolean. The status response contains no credentials, signing material, manifest URLs, asset paths, or asset digests. Other targets return `404 Not Found`.
 7. The camera signals health only after initialization and one complete JPEG frame. Only then may the OTA task mark a `New` or `PendingVerify` image `Valid`.
-8. The first update check starts 30 seconds after health confirmation and later checks run every six hours while network configuration is available.
+8. The first update check starts 30 seconds after health confirmation. Later checks run every six hours for stable provisioning and every 60 seconds for prerelease provisioning while network configuration is available.
 
 New HTTP requests return `503 Service Unavailable` while an artifact is transferring. Existing streams close at a frame boundary. Capture continues, but no new stream consumes a frame during the transfer. There is no update upload endpoint.
 
